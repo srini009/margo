@@ -1,0 +1,185 @@
+#!/usr/bin/env python
+# (C) 2015 The University of Chicago
+#
+# See COPYRIGHT in top-level directory.
+# 
+
+import matplotlib
+matplotlib.use("Agg")
+import base64
+import matplotlib.pyplot as plt; plt.rcdefaults()
+import numpy as np
+from matplotlib.backends.backend_pdf import PdfPages
+import operator
+import sys
+import os
+import glob, re
+import random
+from collections import defaultdict, OrderedDict
+
+time_delta = 0.00001
+
+class Event:
+	def __init__(self, ts, pool_size, total_pool_size, ev, mid, order, rpc, max_rss, pid):
+		self.ts = ts
+		self.pool_size = pool_size
+		self.total_pool_size = total_pool_size
+		self.ev = ev
+		self.mid = mid
+		self.rpc = rpc
+		self.order = order
+		self.max_rss = max_rss
+		self.pid = pid
+
+class Request:
+
+	def __init__(self, req_id, sorted_event_list, op, latency, pid):
+		self.req_id = req_id
+		self.sorted_event_list = sorted_event_list
+		self.op = op
+		self.latency = latency
+		self.pid = pid
+
+class RequestOpMetadata:
+	
+	latency_std = 0.0
+	latency_average = 0.0
+
+	def __init__(self, op, time_series_data):
+		self.op = op
+		self.time_series_data = time_series_data
+
+	def calculatestats(self):
+		latency_arr = []
+		for i in self.time_series_data:
+			ts = i[0]
+			latency = i[1]
+			latency_arr.append(latency)
+
+		self.latency_std = np.std(latency_arr)
+		self.latency_average = np.mean(latency_arr)
+		
+	def graphtimeseriesinfo(self, tt, rpc2name, colors, pidtohost):
+		gen_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+		area = np.pi*3
+		names = [ 'latency', 'max_rss', 'abt_pool_size', 'abt_total_pool_size', 'num_events_in_req']
+		start_time = self.time_series_data[0][0]
+
+		fig, ax = plt.subplots(len(names)+1, figsize=(15,15))
+		plt.subplots_adjust(hspace=0.3)
+		fig.suptitle('Time Series for Op: ' + rpc2name.get(int(self.op), "UNKNOWN_RPC_OP"), fontsize=20, fontweight='bold')
+		txt = "latency = Total response time for request initiated at given timestamp \nmax_rss = Maximum of resident set size highwatermark (from getrusage) for all instrumentation points in the path of the request \nabt_pool_size = Maximum ABT pool size for all instrumentation points in the path of the request \nabt_total_pool_size = Maximum ABT total pool size for all instrumentation points in the path of the request \nnum_events_in_req = Number of events in the request (correlates with number of microservice operations for request)"
+
+		ax[0].text(0, 0.5, txt, style='italic',
+			bbox={'facecolor': 'red', 'alpha': 0.5, 'pad': 10}, horizontalalignment='left')
+		ax[0].set_xticks([])
+		ax[0].set_yticks([])
+		for k1, v1 in ax[0].spines.items():
+			v1.set_visible(False)
+
+		max_ts = []
+		for g in range(0,len(names)):
+			host_ts = defaultdict(list)
+			host_val = defaultdict(list)
+			for i in self.time_series_data:
+				host_ts[str(pidtohost[i[len(i)-1]])].append(i[0] - start_time)
+				host_val[str(pidtohost[i[len(i)-1]])].append(i[g+1])
+
+			# Plot
+			for num, host in enumerate(host_ts.keys()):
+				ts = host_ts[host]
+				val = host_val[host]
+				ax[g+1].scatter(ts, val, s=area, c=gen_colors[num], label=host, alpha=0.6, edgecolors='none')
+				max_ts.append(max(ts))
+			ax[g+1].set_xlim(0, max(max_ts)*1.05)
+			ax[g+1].set_xlabel('timestamp')
+			ax[g+1].set_ylabel(names[g])
+		plt.legend(bbox_to_anchor=(1, 1), bbox_transform=plt.gcf().transFigure)
+		plt.savefig(tt, format='pdf')
+		plt.close()
+		
+	
+class TraceGenerator:
+	def __init__(self):
+		self.name = "MargoTraceGenerator"
+		self.rpc2name = dict()
+		self.event_dict = defaultdict(list)
+		self.colors = dict()
+		self.request_list = list()
+		self.request_op_metadata_list = list()
+		self.hostlist = set()
+		self.pidtohost = dict()
+		self.tt = PdfPages('trace.pdf')
+
+	# Read all the trace files and gather a list of events for every unique request in the trace file
+	def readfiles(self):
+		files = glob.glob(str(os.getcwd())+"/*.trace") #Read all *.trace files in CURRENT_WORKING_DIRECTORY
+		for f in files:
+			f1 = open(f, "r")
+			contents = f1.readlines()
+			hostname = contents[0] #First line is always hostname
+			self.hostlist.add(str(hostname))
+			pid = contents[1] #Second line is always pid
+			self.pidtohost[int(pid)] = (str(hostname))
+			self.colors[hostname] = (random.uniform(0, 1), random.uniform(0, 1), random.uniform(0, 1))
+			num_registered_rpcs = int(contents[2]) #First line is always number of RPC's registered with the margo instance generating this file
+			rpc_contents = contents[3:num_registered_rpcs]
+			for i in range(0, len(rpc_contents)):
+				op_id, op_name = rpc_contents[i].split(",")
+				self.rpc2name[int(op_id)] = str(op_name)
+
+			contents_ = contents[3 + num_registered_rpcs:]
+			for i in range(0, len(contents_)):
+				req_id, ts, rpc, ev, pool_size, total_pool_size, mid, order, counter, max_rss = contents_[i].split(",")
+				self.event_dict[req_id].append(Event(float(ts), int(pool_size), int(total_pool_size), int(ev), mid, int(order), int(rpc), int(max_rss), int(pid)))
+			f1.close()
+
+	# Go through every request and sort the events inside the request
+	def sorteventsinrequest(self):
+		for req in self.event_dict.keys():
+			ev_list = self.event_dict[req]
+			ev_list.sort(key=lambda x: x.order)
+			self.request_list.append(Request(req, ev_list, ev_list[0].rpc, ev_list[len(ev_list)-1].ts - ev_list[0].ts, ev_list[1].pid))
+
+	# For every op, generate the times series data of ts, latency, ABT queue info, memory info, etc.
+	def generatereqmetadata(self):
+		request_time_series_data = defaultdict(list)
+		for req in self.request_list:
+			rss = list()
+			abt_pool_total_size = list()
+			abt_pool_size = list()
+			for ev in req.sorted_event_list:
+				rss.append(ev.max_rss)
+				abt_pool_total_size.append(ev.total_pool_size)
+				abt_pool_size.append(ev.pool_size)
+			request_time_series_data[req.op].append((req.sorted_event_list[0].ts, req.latency, max(rss), max(abt_pool_size), max(abt_pool_total_size), len(req.sorted_event_list), req.pid))
+
+		# For every op, sort requests based on timestamp
+		for op in request_time_series_data.keys():
+			request_time_series_data[op].sort(key = lambda x: x[0])
+			self.request_op_metadata_list.append(RequestOpMetadata(op, request_time_series_data[op]))
+
+		for reqopmetadata in self.request_op_metadata_list:
+			reqopmetadata.calculatestats()
+			reqopmetadata.graphtimeseriesinfo(self.tt, self.rpc2name, self.colors, self.pidtohost)
+
+	def printtotalreqlatency(self):
+		for req in self.request_list:
+			print (req.req_id, req.latency)
+
+	def finalize(self):
+		self.tt.close()	
+
+def main():
+	print
+	print ("*******************MARGO Trace Generator******************")
+	print
+	print ("Reading .trace files from: " + os.getcwd())
+
+	t = TraceGenerator()
+	t.readfiles()
+	t.sorteventsinrequest()
+	t.generatereqmetadata()
+	t.finalize()
+
+main()

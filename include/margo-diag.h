@@ -9,7 +9,9 @@
 #include <stdint.h>     /* defines uint32_t etc */
 #include <sys/param.h>  /* attempt to define endianness */
 #ifdef linux
-# include <endian.h>    /* attempt to define endianness */
+#include <endian.h>    /* attempt to define endianness */
+#include <sys/time.h>
+#include <sys/resource.h>
 #endif
 
 #ifndef __MARGO_DIAG
@@ -100,6 +102,57 @@ struct margo_breadcrumb_snapshot
   struct margo_breadcrumb* ptr;
 };
 
+/* Request tracing definitions */
+enum ev_type
+{
+  cs, sr, ss, cr
+};
+
+typedef enum ev_type ev_type;
+
+struct trace_metadata
+{
+   size_t abt_pool_size;
+   size_t abt_pool_total_size;
+   uint64_t mid;
+   #ifdef linux
+   struct rusage usage;
+   #endif
+};
+
+struct margo_trace_record
+{
+  uint64_t trace_id;
+  double ts;
+  uint64_t rpc;
+  ev_type ev;
+  uint64_t order;
+  struct trace_metadata metadata;
+};
+
+struct margo_system_stat
+{
+  size_t abt_pool_size;
+  size_t abt_pool_total_size;
+  double system_cpu_util;
+  double system_memory_util;
+  double loadavg_1m;
+  double loadavg_5m;
+  double loadavg_15m;
+  double ts;
+};
+
+struct request_metadata
+{
+  uint64_t rpc_breadcrumb;
+  uint64_t trace_id;
+  uint64_t order;
+  uint64_t current_rpc;
+};
+
+typedef struct request_metadata request_metadata;
+typedef struct margo_trace_record margo_trace_record;
+typedef struct margo_system_stat margo_system_stat;
 
 #ifdef __cplusplus
 }

@@ -23,6 +23,7 @@
 #define DEFAULT_MERCURY_HANDLE_CACHE_SIZE 32
 
 #define MARGO_SPARKLINE_TIMESLICE 1
+#define MARGO_SYSTEM_STATS_COLLECTION_TIMESLICE 0.5
 
 /* If margo is initializing ABT, we need to track how many instances of margo
  * are being created, so that the last one can call ABT_finalize.
@@ -63,6 +64,9 @@ static ABT_key rpc_breadcrumb_key = ABT_KEY_NULL;
 
 /* ULT-local key to hold breadcrumb timing data on the target */
 static ABT_key target_timing_key = ABT_KEY_NULL;
+
+static ABT_key trace_id_key = ABT_KEY_NULL;
+static ABT_key request_order_key = ABT_KEY_NULL;
 
 #define __DIAG_UPDATE(__data, __time)\
 do {\
@@ -112,6 +116,7 @@ struct margo_instance
     int margo_init;
     ABT_thread hg_progress_tid;
     ABT_thread sparkline_data_collection_tid;
+    ABT_thread system_stats_collection_tid;
     int hg_progress_shutdown_flag;
     ABT_xstream progress_xstream;
     int owns_progress_pool;
@@ -158,12 +163,19 @@ struct margo_instance
     unsigned int profile_enabled;
     uint64_t self_addr_hash;
     double previous_sparkline_data_collection_time;
+    double previous_system_stats_collection_time;
     uint16_t sparkline_index;
+    uint16_t system_stats_index;
     struct diag_data diag_trigger_elapsed;
     struct diag_data diag_progress_elapsed_zero_timeout;
     struct diag_data diag_progress_elapsed_nonzero_timeout;
     struct diag_data diag_progress_timeout_value;
     struct diag_data *diag_rpc;
+    margo_trace_record * trace_records;
+    margo_system_stat * system_stats;
+    unsigned int trace_record_index;
+    unsigned int trace_id_counter;
+    double trace_collection_start_time;
     ABT_mutex diag_rpc_mutex;
 };
 
@@ -173,8 +185,10 @@ struct margo_request_struct {
     hg_handle_t handle;
     double start_time;       /* timestamp of when the operation started */
     uint64_t rpc_breadcrumb; /* statistics tracking identifier, if applicable */
+    uint64_t current_rpc;
     uint64_t server_addr_hash; /* hash of globally unique string addr of margo server instance */
     uint16_t provider_id; /* id of the provider servicing the request, local to the margo server instance */
+    uint64_t trace_id;
 };
 
 struct margo_rpc_data
@@ -189,6 +203,7 @@ MERCURY_GEN_PROC(margo_shutdown_out_t, ((int32_t)(ret)))
 
 static void hg_progress_fn(void* foo);
 static void sparkline_data_collection_fn(void* foo);
+static void system_stats_collection_fn(void* foo);
 
 static void margo_rpc_data_free(void* ptr);
 static uint64_t margo_breadcrumb_set(hg_id_t rpc_id);
@@ -273,6 +288,48 @@ static void set_argobots_tunables(void)
      */
     if(!getenv("ABT_THREAD_STACKSIZE"))
         putenv("ABT_THREAD_STACKSIZE=2097152");
+
+    return;
+}
+
+static void margo_internal_trace_id_set(uint64_t trace_id)
+{
+    uint64_t *val;
+
+    ABT_key_get(trace_id_key, (void**)(&val));
+
+    if(val == NULL)
+    {
+        /* key not set yet on this ULT; we need to allocate a new one */
+        /* best effort; just return and don't set it if we can't allocate memory */
+        val = malloc(sizeof(*val));
+        if(!val)
+            return;
+    }
+    *val = trace_id;
+
+    ABT_key_set(trace_id_key, val);
+
+    return;
+}
+
+static void margo_internal_request_order_set(uint64_t order)
+{
+    uint64_t *val;
+
+    ABT_key_get(request_order_key, (void**)(&val));
+
+    if(val == NULL)
+    {
+        /* key not set yet on this ULT; we need to allocate a new one */
+        /* best effort; just return and don't set it if we can't allocate memory */
+        val = malloc(sizeof(*val));
+        if(!val)
+            return;
+    }
+    *val = order;
+
+    ABT_key_set(request_order_key, val);
 
     return;
 }
@@ -388,7 +445,9 @@ margo_instance_id margo_init_opt(const char *addr_str, int mode, const struct hg
     unsigned int profile = 0;
     mid->profile_enabled = 0;
     mid->previous_sparkline_data_collection_time = ABT_get_wtime();
+    mid->previous_system_stats_collection_time = ABT_get_wtime();
     mid->sparkline_index = 0;
+    mid->system_stats_index = 0;
 
     if(getenv("MARGO_ENABLE_PROFILING")) {
       profile = (unsigned int)atoi(getenv("MARGO_ENABLE_PROFILING"));
@@ -397,15 +456,29 @@ margo_instance_id margo_init_opt(const char *addr_str, int mode, const struct hg
 
     if(profile) {
        char * name;
+       uint64_t hash;
+
        margo_profile_start(mid);
 
        GET_SELF_ADDR_STR(mid, name);
-       HASH_JEN(name, strlen(name), mid->self_addr_hash); /*record own address in cache to be used in breadcrumb generation */
+       HASH_JEN(name, strlen(name), hash); /*record own address in the breadcrumb */
+
+       mid->self_addr_hash = hash;
+       mid->system_stats = (margo_system_stat *)malloc(10000*sizeof(margo_system_stat));
+
+       ret = ABT_thread_create(mid->progress_pool, system_stats_collection_fn, mid, 
+       ABT_THREAD_ATTR_NULL, &mid->system_stats_collection_tid);
+       if(ret != 0)
+         fprintf(stderr, "MARGO_PROFILE: Failed to start system stats collection thread. Continuing to profile without system stats collection.\n");
 
        ret = ABT_thread_create(mid->progress_pool, sparkline_data_collection_fn, mid, 
        ABT_THREAD_ATTR_NULL, &mid->sparkline_data_collection_tid);
        if(ret != 0)
          fprintf(stderr, "MARGO_PROFILE: Failed to start sparkline data collection thread. Continuing to profile without sparkline data collection.\n");
+       mid->trace_records = (margo_trace_record *)malloc(5000000*sizeof(margo_trace_record));
+       mid->trace_record_index = 0;
+       mid->trace_id_counter = 0;
+       mid->trace_collection_start_time = ABT_get_wtime();
 
     }
 
@@ -466,7 +539,12 @@ margo_instance_id margo_init_pool(ABT_pool progress_pool, ABT_pool handler_pool,
     struct margo_instance *mid;
 
     /* set input offset to include breadcrumb information in Mercury requests */
-    hret = HG_Class_set_input_offset(HG_Context_get_class(hg_context), sizeof(uint64_t));
+    hret = HG_Class_set_input_offset(HG_Context_get_class(hg_context), sizeof(request_metadata));
+    /* this should not ever fail */
+    assert(hret == HG_SUCCESS);
+
+    /* set order offset to include request order for the sake of distributed tracing */
+    hret = HG_Class_set_output_offset(HG_Context_get_class(hg_context), sizeof(uint64_t));
     /* this should not ever fail */
     assert(hret == HG_SUCCESS);
 
@@ -511,6 +589,14 @@ margo_instance_id margo_init_pool(ABT_pool progress_pool, ABT_pool handler_pool,
         goto err;
 
     ret = ABT_key_create(free, &target_timing_key);
+    if(ret != 0)
+        goto err;
+
+    ret = ABT_key_create(free, &trace_id_key);
+    if(ret != 0)
+        goto err;
+  
+    ret = ABT_key_create(free, &request_order_key);
     if(ret != 0)
         goto err;
 
@@ -652,9 +738,15 @@ void margo_finalize(margo_instance_id mid)
     ABT_thread_free(&mid->hg_progress_tid);
 
     if(mid->profile_enabled) {
-      ABT_thread_join(mid->sparkline_data_collection_tid);
-      ABT_thread_free(&mid->sparkline_data_collection_tid);
+      /*ABT_thread_join(mid->sparkline_data_collection_tid);
+      ABT_thread_free(&mid->sparkline_data_collection_tid);*/
+
+      /*ABT_thread_join(mid->system_stats_collection_tid);
+      ABT_thread_free(&mid->system_stats_collection_tid);*/
+
       margo_profile_dump(mid, "profile", 1);
+      margo_system_stats_dump(mid, "profile", 1);
+      margo_trace_dump(mid, "profile", 1);
     }
     
     if(mid->diag_enabled) 
@@ -1093,11 +1185,31 @@ hg_return_t margo_destroy(hg_handle_t handle)
     return hret;
 }
 
+static void margo_internal_generate_trace_event(margo_instance_id mid, uint64_t trace_id, ev_type ev, uint64_t rpc, uint64_t order)
+{
+
+   mid->trace_records[mid->trace_record_index].trace_id = trace_id;
+   mid->trace_records[mid->trace_record_index].ts = ABT_get_wtime();
+   mid->trace_records[mid->trace_record_index].rpc = rpc;
+   mid->trace_records[mid->trace_record_index].ev = ev;
+   ABT_pool_get_total_size(mid->handler_pool, &(mid->trace_records[mid->trace_record_index].metadata.abt_pool_total_size));
+   ABT_pool_get_size(mid->handler_pool, &(mid->trace_records[mid->trace_record_index].metadata.abt_pool_size));
+   mid->trace_records[mid->trace_record_index].metadata.mid = mid->self_addr_hash;
+   mid->trace_records[mid->trace_record_index].order = order;
+   mid->trace_record_index++;
+
+   #ifdef linux
+   getrusage(RUSAGE_SELF, &mid->trace_records[mid->trace_record_index].metadata.usage);
+   #endif
+}
+
 static hg_return_t margo_cb(const struct hg_cb_info *info)
 {
     hg_return_t hret = info->ret;
     margo_request req = (margo_request)(info->arg);
     margo_instance_id mid;
+    uint64_t * temp;
+    uint64_t * order;
 
     if(hret == HG_CANCELED && req->timer) {
         hret = HG_TIMEOUT;
@@ -1123,6 +1235,11 @@ static hg_return_t margo_cb(const struct hg_cb_info *info)
         if(mid->profile_enabled) {
           /* 0 here indicates this is a origin-side call */
           margo_breadcrumb_measure(mid, req->rpc_breadcrumb, req->start_time, 0, req->provider_id, req->server_addr_hash, req->handle);
+          int ret = HG_Get_output_buf(req->handle, (void**)&temp, NULL);
+          if(ret != HG_SUCCESS)
+            return(ret);
+
+          margo_internal_generate_trace_event(mid, req->trace_id, cr, req->current_rpc, (*temp) + 1);
         }
     }
 
@@ -1157,6 +1274,23 @@ static void margo_forward_timeout_cb(void *arg)
     return;
 }
 
+static __uint128_t margo_internal_generate_trace_id(margo_instance_id mid)
+{
+    char * name;
+    uint64_t trace_id;
+    uint64_t hash;
+
+    GET_SELF_ADDR_STR(mid, name);
+    HASH_JEN(name, strlen(name), hash); /*record own address in the breadcrumb */
+    trace_id = hash;
+    trace_id = ((trace_id) << 32);
+    trace_id |= mid->trace_id_counter;
+    mid->trace_id_counter++;
+    return trace_id;
+}
+ 
+
+
 static hg_return_t margo_provider_iforward_internal(
     uint16_t provider_id,
     hg_handle_t handle,
@@ -1172,9 +1306,11 @@ static hg_return_t margo_provider_iforward_internal(
     hg_proc_cb_t in_cb, out_cb;
     hg_bool_t flag;
     margo_instance_id mid = margo_hg_handle_get_instance(handle);
-    uint64_t *rpc_breadcrumb;
+    request_metadata * metadata;
+    uint64_t * order;
     char addr_string[128];
     hg_size_t addr_string_sz = 128;
+    __uint128_t * trace_id;
 
     assert(provider_id <= MARGO_MAX_PROVIDER_ID);
 
@@ -1240,19 +1376,38 @@ static hg_return_t margo_provider_iforward_internal(
     /* add rpc breadcrumb to outbound request; this will be used to track
      * rpc statistics.
      */
-
     req->rpc_breadcrumb = 0;
     if(mid->profile_enabled) {
-        ret = HG_Get_input_buf(handle, (void**)&rpc_breadcrumb, NULL);
+        ret = HG_Get_input_buf(handle, (void**)&metadata, NULL);
         if(ret != HG_SUCCESS)
             return(ret);
         req->rpc_breadcrumb = margo_breadcrumb_set(hgi->id);
         /* LE encoding */
-        *rpc_breadcrumb = htole64(req->rpc_breadcrumb);
+        req->rpc_breadcrumb = htole64(req->rpc_breadcrumb);
 
+        (*metadata).rpc_breadcrumb = req->rpc_breadcrumb;
+        (*metadata).current_rpc = (hgi->id) >> (__MARGO_PROVIDER_ID_SIZE*8);
+        (*metadata).current_rpc &= 0xffff;
+        req->current_rpc = (*metadata).current_rpc;
+
+        ABT_key_get(trace_id_key, (void**)(&trace_id));
+
+        if(trace_id == NULL) {
+          (*metadata).trace_id = margo_internal_generate_trace_id(mid);
+          (*metadata).order = 0;
+        } else {
+          (*metadata).trace_id = (*trace_id);
+          ABT_key_get(request_order_key, (void**)&order);
+          (*metadata).order = (*order) + 1;
+          margo_internal_request_order_set((*order) + 4);
+        }
+
+        req->trace_id = (*metadata).trace_id;
         req->start_time = ABT_get_wtime();
+
+        margo_internal_generate_trace_event(mid, (*metadata).trace_id, cs, (*metadata).current_rpc, (*metadata).order);
     
-       /* add information about the server and provider servicing the request */
+        /* add information about the server and provider servicing the request */
         req->provider_id = provider_id; /*store id of provider servicing the request */
         const struct hg_info * inf = HG_Get_info(req->handle);
         margo_addr_to_string(mid, addr_string, &addr_string_sz, inf->addr);
@@ -1352,6 +1507,8 @@ hg_return_t margo_respond(
 
     /* retrieve the ULT-local key for this breadcrumb and add measurement to profile */
     struct margo_request_struct* treq;
+    uint64_t * order;
+    uint64_t * temp;
     margo_instance_id mid = margo_hg_handle_get_instance(handle);
     if(mid->profile_enabled) {
       ABT_key_get(target_timing_key, (void**)(&treq));
@@ -1359,6 +1516,15 @@ hg_return_t margo_respond(
     
       /* the "1" indicates that this a target-side breadcrumb */
       margo_breadcrumb_measure(mid, treq->rpc_breadcrumb, treq->start_time, 1, treq->provider_id, treq->server_addr_hash, handle);
+
+      ABT_key_get(request_order_key, (void**)(&order));
+
+      int ret = HG_Get_output_buf(handle, (void**)&temp, NULL);
+      if(ret != HG_SUCCESS)
+        return(ret);
+
+      (*temp) = (*order) + 1;
+      margo_internal_generate_trace_event(mid, treq->trace_id, ss, treq->current_rpc, (*order) + 1);
     }
 
     hg_return_t hret;
@@ -1653,6 +1819,79 @@ static void sparkline_data_collection_fn(void* foo)
       
         mid->sparkline_index++;
         mid->previous_sparkline_data_collection_time = ABT_get_wtime();
+   	ABT_thread_yield();
+      } else {
+        ABT_thread_yield();
+      }
+   }
+
+   return;
+}
+
+static double calculate_percent_cpu_util()
+{
+    char str[100], dummy[10];
+    uint64_t user, nice, system, idle, iowait_1, iowait_2, iowait_3, irq, softirq, steal;
+    FILE* fp = fopen("/proc/stat","r");
+    fgets(str,100,fp);
+    fclose(fp);
+    sscanf(str, "%s %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu", dummy, &user, &nice, &system, &idle, &iowait_1, &iowait_2, &iowait_3, &irq, &softirq, &steal);
+    return (1.0-((double)idle/(double)(user+nice+system+idle+iowait_1+iowait_2+iowait_3+irq+softirq+steal)))*100.0;
+}
+
+static double calculate_percent_memory_util()
+{
+    char str1[100], str2[100], dummy1[20], dummy2[20], dummy3[20], dummy4[20];
+    char * buf1 = str1;
+    char * buf2 = str2;
+    uint64_t memtotal, memfree;
+    FILE* fp = fopen("/proc/meminfo","r");
+    size_t s1 = 100, s2 = 100;
+    getline(&buf1, &s1, fp);
+    getline(&buf2, &s2, fp);
+    sscanf(str1, "%s %lu %s", dummy1, &memtotal, dummy2);
+    sscanf(str2, "%s %lu %s", dummy3, &memfree, dummy4);
+    fclose(fp);
+    return (1.0-((double)memfree/(double)memtotal))*100.0;
+}
+
+static void system_stats_collection_fn(void* foo)
+{
+    int ret;
+    struct margo_instance *mid = (struct margo_instance *)foo;
+    double time_passed, end = 0;
+    struct diag_data *stat, *tmp;
+    double load_averages[3];
+    char str[100];
+
+    /* double check that profile collection should run, else, close this ULT */
+    if(!mid->profile_enabled) {
+      ABT_thread_join(mid->system_stats_collection_tid);
+      ABT_thread_free(&mid->system_stats_collection_tid);
+    }
+
+    while(!mid->hg_progress_shutdown_flag)
+    {
+      
+      end = ABT_get_wtime();
+      time_passed = end - mid->previous_system_stats_collection_time;
+
+      if(time_passed >= MARGO_SYSTEM_STATS_COLLECTION_TIMESLICE) {
+
+        getloadavg(load_averages, 3);
+        mid->system_stats[mid->system_stats_index].loadavg_1m = load_averages[0];
+        mid->system_stats[mid->system_stats_index].loadavg_5m = load_averages[1];
+        mid->system_stats[mid->system_stats_index].loadavg_15m = load_averages[2];
+        mid->system_stats[mid->system_stats_index].system_cpu_util = calculate_percent_cpu_util();
+        mid->system_stats[mid->system_stats_index].system_memory_util = calculate_percent_memory_util();
+
+        ABT_pool_get_total_size(mid->handler_pool, &(mid->system_stats[mid->system_stats_index].abt_pool_total_size));
+        ABT_pool_get_size(mid->handler_pool, &(mid->system_stats[mid->system_stats_index].abt_pool_size));
+
+        mid->system_stats[mid->system_stats_index].ts = ABT_get_wtime();
+        mid->system_stats_index++;
+        mid->previous_system_stats_collection_time = ABT_get_wtime();
+
    	ABT_thread_yield();
       } else {
         ABT_thread_yield();
@@ -2058,7 +2297,126 @@ void margo_profile_dump(margo_instance_id mid, const char* file, int uniquify)
 
     if(outfile != stdout)
         fclose(outfile);
-    
+   
+    fprintf(stderr, "Instance %lu has %d trace record_entries\n", hash, mid->trace_record_index); 
+    return;
+}
+
+void margo_system_stats_dump(margo_instance_id mid, const char* file, int uniquify)
+{
+    FILE *outfile;
+    char revised_file_name[256] = {0};
+    struct margo_registered_rpc *tmp_rpc;
+    char hostname[128] = {0};
+    int pid;
+    int i;
+
+    assert(mid->profile_enabled);
+
+    if(uniquify)
+    {
+        gethostname(hostname, 128);
+        pid = getpid();
+
+        sprintf(revised_file_name, "%s-%s-%d.stats", file, hostname, pid);
+    }
+
+    else
+    {
+        sprintf(revised_file_name, "%s.stats", file);
+    }
+
+    if(strcmp("-", file) == 0)
+    {
+        outfile = stdout;
+    }
+    else
+    {
+        outfile = fopen(revised_file_name, "a");
+        if(!outfile)
+        {
+            perror("fopen");
+            return;
+        }
+    }
+
+    fprintf(outfile, "%s\n", hostname);
+    fprintf(outfile, "%d\n", pid);
+    fprintf(outfile, "%d\n", mid->system_stats_index);
+
+    for(i = 0; i < mid->system_stats_index; i++)
+      fprintf(outfile, "%.9f, %d, %d, %.9f, %.9f, %.9f, %.9f, %.9f\n", mid->system_stats[i].ts, mid->system_stats[i].abt_pool_size, mid->system_stats[i].abt_pool_total_size, mid->system_stats[i].system_cpu_util, mid->system_stats[i].system_memory_util, mid->system_stats[i].loadavg_1m, mid->system_stats[i].loadavg_5m, mid->system_stats[i].loadavg_15m);
+
+
+    if(outfile != stdout)
+        fclose(outfile);
+
+    return;
+}
+
+void margo_trace_dump(margo_instance_id mid, const char* file, int uniquify)
+{
+    FILE *outfile;
+    char revised_file_name[256] = {0};
+    struct margo_registered_rpc *tmp_rpc;
+    int i;
+    char hostname[128] = {0};
+    int pid;
+
+    assert(mid->profile_enabled);
+
+    if(uniquify)
+    {
+        gethostname(hostname, 128);
+        pid = getpid();
+
+        sprintf(revised_file_name, "%s-%s-%d.trace", file, hostname, pid);
+    }
+
+    else
+    {
+        sprintf(revised_file_name, "%s.trace", file);
+    }
+
+    if(strcmp("-", file) == 0)
+    {
+        outfile = stdout;
+    }
+    else
+    {
+        outfile = fopen(revised_file_name, "a");
+        if(!outfile)
+        {
+            perror("fopen");
+            return;
+        }
+    }
+
+    fprintf(outfile, "%s\n", hostname);
+    fprintf(outfile, "%d\n", pid);
+    fprintf(outfile, "%u\n", mid->num_registered_rpcs);
+    tmp_rpc = mid->registered_rpcs;
+
+    while(tmp_rpc)
+    {
+        fprintf(outfile, "%lu, %s\n", tmp_rpc->rpc_breadcrumb_fragment, tmp_rpc->func_name);
+        tmp_rpc = tmp_rpc->next;
+    }
+
+    for(i = 0; i < mid->trace_record_index; i++) {
+      fprintf(outfile, "%lu, %.9f, %lu, %d, %d, %d, %lu, %d, %d, %lu\n", mid->trace_records[i].trace_id, mid->trace_records[i].ts, mid->trace_records[i].rpc, mid->trace_records[i].ev, mid->trace_records[i].metadata.abt_pool_size, mid->trace_records[i].metadata.abt_pool_total_size, mid->trace_records[i].metadata.mid, mid->trace_records[i].order, mid->trace_id_counter, mid->trace_records[i].metadata.usage.ru_maxrss);
+
+      /* Below is the chrome-compatible format */
+      /*if(mid->trace_records[i].ev == 0 || mid->trace_records[i].ev == 3) {
+         fprintf(outfile, "{\"name\":\"%lu\", \"cat\": \"PERF\", \"ph\":\"B\", \"pid\": %lu, \"ts\": %f, \"trace_id\": %lu},\n", mid->trace_records[i].rpc, mid->trace_records[i].metadata.mid, (mid->trace_records[i].ts - mid->trace_collection_start_time), mid->trace_records[i].trace_id);
+      } else {
+         fprintf(outfile, "{\"name\":\"%lu\", \"cat\": \"PERF\", \"ph\":\"E\", \"pid\": %lu, \"ts\": %f, \"trace_id\": %lu},\n", mid->trace_records[i].rpc, mid->trace_records[i].metadata.mid, (mid->trace_records[i].ts - mid->trace_collection_start_time), mid->trace_records[i].trace_id);
+      }*/
+    }
+
+    if(outfile != stdout)
+        fclose(outfile);
+
     return;
 }
 
@@ -2464,14 +2822,14 @@ static void margo_internal_breadcrumb_handler_set(uint64_t rpc_breadcrumb)
 void __margo_internal_pre_wrapper_hooks(margo_instance_id mid, hg_handle_t handle)
 {
     hg_return_t ret;
-    uint64_t *rpc_breadcrumb;
+    request_metadata * metadata;
     const struct hg_info* info;
     char * name;
     struct margo_request_struct* req;
 
-    ret = HG_Get_input_buf(handle, (void**)&rpc_breadcrumb, NULL);
+    ret = HG_Get_input_buf(handle, (void**)&metadata, NULL);
     assert(ret == HG_SUCCESS);
-    *rpc_breadcrumb = le64toh(*rpc_breadcrumb);
+    (*metadata).rpc_breadcrumb = le64toh((*metadata).rpc_breadcrumb);
   
     /* add the incoming breadcrumb info to a ULT-local key if profiling is enabled */
     if(mid->profile_enabled) {
@@ -2483,10 +2841,12 @@ void __margo_internal_pre_wrapper_hooks(margo_instance_id mid, hg_handle_t handl
             req = calloc(1, sizeof(*req));
         }
     
-        req->rpc_breadcrumb = *rpc_breadcrumb;
+        req->rpc_breadcrumb = (*metadata).rpc_breadcrumb;
 
         req->timer = NULL;
         req->handle = handle;
+        req->current_rpc = (*metadata).current_rpc;
+        req->trace_id = (*metadata).trace_id;
         req->start_time = ABT_get_wtime(); /* measure start time */
         info = HG_Get_info(handle);
         req->provider_id = 0;
@@ -2500,7 +2860,10 @@ void __margo_internal_pre_wrapper_hooks(margo_instance_id mid, hg_handle_t handl
          * led to that point.
          */
         ABT_key_set(target_timing_key, req);
-        margo_internal_breadcrumb_handler_set((*rpc_breadcrumb) << 16);
+        margo_internal_generate_trace_event(mid, (*metadata).trace_id, sr, (*metadata).current_rpc, (*metadata).order + 1);
+        margo_internal_request_order_set((*metadata).order + 1);
+        margo_internal_breadcrumb_handler_set((*metadata).rpc_breadcrumb << 16);
+        margo_internal_trace_id_set((*metadata).trace_id);
     }
 }
 
