@@ -738,11 +738,11 @@ void margo_finalize(margo_instance_id mid)
     ABT_thread_free(&mid->hg_progress_tid);
 
     if(mid->profile_enabled) {
-      /*ABT_thread_join(mid->sparkline_data_collection_tid);
-      ABT_thread_free(&mid->sparkline_data_collection_tid);*/
+      ABT_thread_join(mid->sparkline_data_collection_tid);
+      ABT_thread_free(&mid->sparkline_data_collection_tid);
 
-      /*ABT_thread_join(mid->system_stats_collection_tid);
-      ABT_thread_free(&mid->system_stats_collection_tid);*/
+      ABT_thread_join(mid->system_stats_collection_tid);
+      ABT_thread_free(&mid->system_stats_collection_tid);
 
       margo_profile_dump(mid, "profile", 1);
       margo_system_stats_dump(mid, "profile", 1);
