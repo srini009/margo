@@ -149,10 +149,13 @@ class TraceGenerator:
 			blocked_tasks = list()
 			abt_pool_size = list()
 			for ev in req.sorted_event_list:
-				rss.append(ev.max_rss)
-				blocked_tasks.append(ev.blocked_tasks)
-				abt_pool_size.append(ev.pool_size)
-			request_time_series_data[req.op].append((req.sorted_event_list[0].ts, req.latency, max(rss), max(abt_pool_size), max(blocked_tasks), len(req.sorted_event_list), req.pid))
+				rss.append((ev.max_rss, self.pidtohost[int(ev.pid)]))
+				blocked_tasks.append((ev.blocked_tasks, self.pidtohost[int(ev.pid)]))
+				abt_pool_size.append((ev.pool_size, self.pidtohost[int(ev.pid)]))
+			rss.sort(key = lambda x: x[0], reverse=True)
+			blocked_tasks.sort(key = lambda x: x[0], reverse=True)
+			abt_pool_size.sort(key = lambda x: x[0], reverse=True)
+			request_time_series_data[req.op].append((req.sorted_event_list[0].ts, req.latency, rss[0][0], abt_pool_size[0][0], blocked_tasks[0][0], len(req.sorted_event_list), req.pid))
 
 		# For every op, sort requests based on timestamp
 		for op in request_time_series_data.keys():
