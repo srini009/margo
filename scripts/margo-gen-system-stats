@@ -62,12 +62,12 @@ class StatGenerator:
 			f1.close()
 
 	def gengraphs(self):
-		names = ['abt_pool_size', 'blocked_tasks', 'mem_utilization', 'cpu_utilization', 'loadavg_1m', 'loadavg_5m', 'loadavg_15m']
+		names = ['tasks_eligible_to_run', 'blocked_tasks', 'mem_utilization (%)', 'cpu_utilization (%)', 'loadavg_1m', 'loadavg_5m', 'loadavg_15m']
 		gen_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
 		fig, ax = plt.subplots(len(names)+1, figsize=(20,20))
 		plt.subplots_adjust(hspace=0.4)
 		fig.suptitle('System stats', fontsize=20, fontweight='bold')
-		txt = "This profile presents a node-level view of various system statistics collected through periodic sampling\nabt_pool_size = Number of pending ULTs eligible to run\nblocked_tasks = Number of ULTs that are blocked (abt_total_pool_size - abt_pool_size)\nmem_util = Percentage of memory utilized on the node (1-(free_memory/total_memory))\ncpu_utilization = Percentage of CPU time spent in everything except idle state (1-(idle_time/total_time))\nloadavg_xm = Linux load average on the node for last X minutes\n"
+		txt = "This profile presents a node-level view of various system statistics collected through periodic sampling on every node independent of requests \ntasks_eligible_to_run (abt_pool_size) = Number of pending ULTs eligible to run\nblocked_tasks (abt_total_pool_size - abt_pool_size) = Number of ULTs that are blocked\nmem_util = Percentage of memory utilized on the node calculated as (1-(free_memory/total_memory))\ncpu_utilization = Percentage of CPU time spent in everything except idle state calculated as (1-(idle_time/total_time))\nloadavg_xm = Linux load average on the node for last X minutes\n"
 		ax[0].text(0, 0.5, txt, style='italic',
 			bbox={'facecolor': 'red', 'alpha': 0.5, 'pad': 10}, horizontalalignment='left')
 		ax[0].set_xticks([])
@@ -87,7 +87,7 @@ class StatGenerator:
 				val = host_val[host]
 				ax[i+1].scatter(ts, val, s=np.pi*3, c=gen_colors[num], label=host, alpha=0.6, edgecolors='none')
 				ax[i+1].set_xlim([0, max(ts)*1.05])
-			ax[i+1].set_xlabel('timestamp')
+			ax[i+1].set_xlabel('timestamp (s)')
 			ax[i+1].set_ylabel(names[i])
 
 		plt.legend(bbox_to_anchor=(1, 1), bbox_transform=plt.gcf().transFigure)
