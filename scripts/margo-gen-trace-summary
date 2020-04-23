@@ -20,10 +20,10 @@ from collections import defaultdict, OrderedDict
 time_delta = 0.00001
 
 class Event:
-	def __init__(self, ts, pool_size, total_pool_size, ev, mid, order, rpc, max_rss, pid):
+	def __init__(self, ts, pool_size, blocked_tasks, ev, mid, order, rpc, max_rss, pid):
 		self.ts = ts
 		self.pool_size = pool_size
-		self.total_pool_size = total_pool_size
+		self.blocked_tasks = blocked_tasks
 		self.ev = ev
 		self.mid = mid
 		self.rpc = rpc
@@ -62,13 +62,13 @@ class RequestOpMetadata:
 	def graphtimeseriesinfo(self, tt, rpc2name, colors, pidtohost):
 		gen_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
 		area = np.pi*3
-		names = [ 'latency', 'max_rss', 'abt_pool_size', 'abt_total_pool_size', 'num_events_in_req']
+		names = [ 'latency (s)', 'max_rss (KB)', 'tasks_eligible_to_run', 'blocked_tasks', 'num_events_in_req']
 		start_time = self.time_series_data[0][0]
 
 		fig, ax = plt.subplots(len(names)+1, figsize=(15,15))
 		plt.subplots_adjust(hspace=0.3)
 		fig.suptitle('Time Series for Op: ' + rpc2name.get(int(self.op), "UNKNOWN_RPC_OP"), fontsize=20, fontweight='bold')
-		txt = "latency = Total response time for request initiated at given timestamp \nmax_rss = Maximum of resident set size highwatermark (from getrusage) for all instrumentation points in the path of the request \nabt_pool_size = Maximum ABT pool size for all instrumentation points in the path of the request \nabt_total_pool_size = Maximum ABT total pool size for all instrumentation points in the path of the request \nnum_events_in_req = Number of events in the request (correlates with number of microservice operations for request)"
+		txt = "latency = Total response time for request initiated at given timestamp \nmax_rss = Maximum of resident set size highwatermark (from getrusage) for all instrumentation points in the path of the request \ntasks_eligible_to_run (abt_pool_size) = Maximum value of abt_pool_size across all instrumentation points in the path of the request \nblocked tasks (abt_total_pool_size - abt_pool_size) = Maximum value for total blocked tasks all instrumentation points in the path of the request \nnum_events_in_req = Number of events in the request (correlates with number of microservice operations for request)"
 
 		ax[0].text(0, 0.5, txt, style='italic',
 			bbox={'facecolor': 'red', 'alpha': 0.5, 'pad': 10}, horizontalalignment='left')
@@ -92,7 +92,7 @@ class RequestOpMetadata:
 				ax[g+1].scatter(ts, val, s=area, c=gen_colors[num], label=host, alpha=0.6, edgecolors='none')
 				max_ts.append(max(ts))
 			ax[g+1].set_xlim(0, max(max_ts)*1.05)
-			ax[g+1].set_xlabel('timestamp')
+			ax[g+1].set_xlabel('timestamp (s)')
 			ax[g+1].set_ylabel(names[g])
 		plt.legend(bbox_to_anchor=(1, 1), bbox_transform=plt.gcf().transFigure)
 		plt.savefig(tt, format='pdf')
@@ -131,7 +131,7 @@ class TraceGenerator:
 			contents_ = contents[3 + num_registered_rpcs:]
 			for i in range(0, len(contents_)):
 				req_id, ts, rpc, ev, pool_size, total_pool_size, mid, order, counter, max_rss = contents_[i].split(",")
-				self.event_dict[req_id].append(Event(float(ts), int(pool_size), int(total_pool_size), int(ev), mid, int(order), int(rpc), int(max_rss), int(pid)))
+				self.event_dict[req_id].append(Event(float(ts), int(pool_size), int(total_pool_size) - int(pool_size), int(ev), mid, int(order), int(rpc), int(max_rss), int(pid)))
 			f1.close()
 
 	# Go through every request and sort the events inside the request
@@ -146,13 +146,13 @@ class TraceGenerator:
 		request_time_series_data = defaultdict(list)
 		for req in self.request_list:
 			rss = list()
-			abt_pool_total_size = list()
+			blocked_tasks = list()
 			abt_pool_size = list()
 			for ev in req.sorted_event_list:
 				rss.append(ev.max_rss)
-				abt_pool_total_size.append(ev.total_pool_size)
+				blocked_tasks.append(ev.blocked_tasks)
 				abt_pool_size.append(ev.pool_size)
-			request_time_series_data[req.op].append((req.sorted_event_list[0].ts, req.latency, max(rss), max(abt_pool_size), max(abt_pool_total_size), len(req.sorted_event_list), req.pid))
+			request_time_series_data[req.op].append((req.sorted_event_list[0].ts, req.latency, max(rss), max(abt_pool_size), max(blocked_tasks), len(req.sorted_event_list), req.pid))
 
 		# For every op, sort requests based on timestamp
 		for op in request_time_series_data.keys():
