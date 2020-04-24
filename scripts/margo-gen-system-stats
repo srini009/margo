@@ -67,7 +67,7 @@ class StatGenerator:
 		fig, ax = plt.subplots(len(names)+1, figsize=(20,20))
 		plt.subplots_adjust(hspace=0.4)
 		fig.suptitle('System stats', fontsize=20, fontweight='bold')
-		txt = "This profile presents a node-level view of various system statistics collected through periodic sampling on every node independent of requests \ntasks_eligible_to_run (abt_pool_size) = Number of pending ULTs eligible to run\nblocked_tasks (abt_total_pool_size - abt_pool_size) = Number of ULTs that are blocked\nmem_util = Percentage of memory utilized on the node calculated as (1-(free_memory/total_memory))\ncpu_utilization = Percentage of CPU time spent in everything except idle state calculated as (1-(idle_time/total_time))\nloadavg_xm = Linux load average on the node for last X minutes\n"
+		txt = "This profile presents a node-level view of various system statistics collected through periodic sampling on every node independent of requests. \ntasks_eligible_to_run (abt_pool_size) = Number of pending ULTs eligible to run\nblocked_tasks (abt_total_pool_size - abt_pool_size) = Number of ULTs that are blocked\nmem_util = Percentage of memory utilized on the node calculated as (1-(free_memory/total_memory))\ncpu_utilization = Percentage of CPU time spent in everything except idle state calculated as (1-(idle_time/total_time))\nloadavg_xm = Linux load average on the node for last X minutes\n"
 		ax[0].text(0, 0.5, txt, style='italic',
 			bbox={'facecolor': 'red', 'alpha': 0.5, 'pad': 10}, horizontalalignment='left')
 		ax[0].set_xticks([])
@@ -90,7 +90,7 @@ class StatGenerator:
 			ax[i+1].set_xlabel('timestamp (s)')
 			ax[i+1].set_ylabel(names[i])
 
-		plt.legend(bbox_to_anchor=(1, 1), bbox_transform=plt.gcf().transFigure)
+		plt.legend(bbox_to_anchor=(0.90, 0.90), bbox_transform=plt.gcf().transFigure)
 		plt.savefig(self.tt, format='pdf')
 		plt.close()
 
