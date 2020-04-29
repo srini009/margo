@@ -113,18 +113,19 @@ class TraceGenerator:
 		self.request_list = list()
 		self.request_op_metadata_list = list()
 		self.pidtohost = dict()
+		self.hosts = set()
 		self.tt = PdfPages('trace.pdf')
 
 	# Read all the trace files and gather a list of events for every unique request in the trace file
 	def readfiles(self):
 		files = glob.glob(str(os.getcwd())+"/*.trace") #Read all *.trace files in CURRENT_WORKING_DIRECTORY
-		host_counter = 0
 		for f in files:
 			f1 = open(f, "r")
 			contents = f1.readlines()
 			hostname = contents[0] #First line is always hostname
-			global_hostcolor[str(hostname)] = global_colors[host_counter]
-			host_counter += 1
+			self.hosts.add(str(hostname))
+			if str(hostname) not in global_hostcolor:
+				global_hostcolor[str(hostname)] = global_colors[len(self.hosts)]
 			pid = contents[1] #Second line is always pid
 			self.pidtohost[int(pid)] = (str(hostname))
 			num_registered_rpcs = int(contents[2]) #First line is always number of RPC's registered with the margo instance generating this file
@@ -136,7 +137,8 @@ class TraceGenerator:
 			contents_ = contents[3 + num_registered_rpcs:]
 			for i in range(0, len(contents_)):
 				req_id, ts, rpc, ev, pool_size, total_pool_size, mid, order, counter, max_rss = contents_[i].split(",")
-				self.event_dict[req_id].append(Event(float(ts), int(pool_size), int(total_pool_size) - int(pool_size), int(ev), mid, int(order), int(rpc), int(max_rss), int(pid)))
+				blocked_tasks = int(total_pool_size) - int(pool_size)
+				self.event_dict[req_id].append(Event(float(ts), int(pool_size), blocked_tasks, int(ev), mid, int(order), int(rpc), int(max_rss), int(pid)))
 			f1.close()
 
 	# Go through every request and sort the events inside the request
