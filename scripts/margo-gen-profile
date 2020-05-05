@@ -150,7 +150,7 @@ class ProfileGenerator:
 			node_string += ("subgraph cluster" + node + " {\n")
 			node_string += ("node [style=filled, color=white];\n style=filled;\n color=lightgrey;\n")
 			for mid in midlist:
-				node_string += ("subgraph cluster" + mid.replace("+", "_").replace(":", "_").replace(".","_").replace("//", "_").replace("/", "_") + " {\n")
+				node_string += ("subgraph cluster" + mid.replace("+", "_").replace(":", "_").replace(".","_").replace("//", "_").replace("/", "_").replace(";","_") + " {\n")
 				node_string += ("node [style=filled];\n color=lightblue;\n")
 				for (provider_type, provider_id) in self.midtoprovider[mid]:
 					node_string += (str(provider_id) + ";\n")
