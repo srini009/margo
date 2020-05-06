@@ -94,13 +94,19 @@ num_events_in_req = Number of events in the request (correlates with number of m
 			for host in host_ts.keys():
 				ts = host_ts[host]
 				val = host_val[host]
-				ax[g+1].scatter(ts, val, s=area, c=global_hostcolor[host], label=host, alpha=0.6, edgecolors='none')
+				ax[g+1].scatter(ts, val, s=area, c=np.random.rand(3,), alpha=0.6, edgecolors='none')
 				max_ts.append(max(ts))
+			#else:
+			#	for host in host_ts.keys():
+			#		ts = host_ts[host]
+			#		val = host_val[host]
+			#		ax[g+1].scatter(ts, val, s=area, c=global_hostcolor[host], label=host, alpha=0.6, edgecolors='none')
+			#		max_ts.append(max(ts))
+			#		ax[g+1].legend(loc='upper left')
+				
 			ax[g+1].set_xlim(0, max(max_ts)*1.05)
 			ax[g+1].set_xlabel('timestamp (s)')
 			ax[g+1].set_ylabel(names[g])
-			ax[g+1].legend(loc='upper left')
-		#plt.legend(bbox_to_anchor=(1, 1), bbox_transform=plt.gcf().transFigure)
 		plt.savefig(tt, format='pdf')
 		plt.close()
 		
@@ -124,7 +130,7 @@ class TraceGenerator:
 			contents = f1.readlines()
 			hostname = contents[0] #First line is always hostname
 			self.hosts.add(str(hostname))
-			if str(hostname) not in global_hostcolor:
+			if ((str(hostname) not in global_hostcolor) and (len(self.hosts) < 9)):
 				global_hostcolor[str(hostname)] = global_colors[len(self.hosts)]
 			pid = contents[1] #Second line is always pid
 			self.pidtohost[int(pid)] = (str(hostname))

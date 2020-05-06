@@ -82,15 +82,24 @@ class StatGenerator:
 			for obj in objs:
 				host_ts[obj.key].append(obj.ts-objs[0].ts)
 				host_val[obj.key].append(obj.val)
-			for num, host in enumerate(host_ts.keys()):
-				ts = host_ts[host]
-				val = host_val[host]
-				ax[i+1].scatter(ts, val, s=np.pi*3, c=gen_colors[num], label=host, alpha=0.6, edgecolors='none')
-				ax[i+1].set_xlim([0, max(ts)*1.05])
+
+			if(len(host_ts.keys()) < 9):
+				for num, host in enumerate(host_ts.keys()):
+					ts = host_ts[host]
+					val = host_val[host]
+					ax[i+1].scatter(ts, val, s=np.pi*3, c=gen_colors[num], label=host, alpha=0.6, edgecolors='none')
+					ax[i+1].legend(loc='upper left')
+					ax[i+1].set_xlim([0, max(ts)*1.05])
+			else:
+				for num, host in enumerate(host_ts.keys()):
+					ts = host_ts[host]
+					val = host_val[host]
+					ax[i+1].scatter(ts, val, s=np.pi*3, c=np.random.rand(3,), alpha=0.6, edgecolors='none')
+					ax[i+1].set_xlim([0, max(ts)*1.05])
 			ax[i+1].set_xlabel('timestamp (s)')
 			ax[i+1].set_ylabel(names[i])
 
-		plt.legend(bbox_to_anchor=(0.90, 0.90), bbox_transform=plt.gcf().transFigure)
+		#plt.legend(bbox_to_anchor=(0.90, 0.90), bbox_transform=plt.gcf().transFigure)
 		plt.savefig(self.tt, format='pdf')
 		plt.close()
 
