@@ -1943,10 +1943,7 @@ static void system_stats_collection_fn(void* foo)
     while(!mid->hg_progress_shutdown_flag)
     {
       
-      end = ABT_get_wtime();
-      time_passed = end - mid->previous_system_stats_collection_time;
-
-      if(time_passed >= MARGO_SYSTEM_STATS_COLLECTION_TIMESLICE) {
+        margo_thread_sleep(mid, MARGO_SYSTEM_STATS_COLLECTION_TIMESLICE*1000);
 
         getloadavg(load_averages, 3);
         mid->system_stats[mid->system_stats_index].loadavg_1m = load_averages[0];
@@ -1961,11 +1958,6 @@ static void system_stats_collection_fn(void* foo)
         mid->system_stats[mid->system_stats_index].ts = ABT_get_wtime();
         mid->system_stats_index++;
         mid->previous_system_stats_collection_time = ABT_get_wtime();
-
-   	ABT_thread_yield();
-      } else {
-        ABT_thread_yield();
-      }
    }
 
    return;
