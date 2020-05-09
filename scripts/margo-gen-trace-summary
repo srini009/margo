@@ -42,6 +42,9 @@ class Request:
 		self.latency = latency
 		self.pid = pid
 
+	def generatespanlist(self):
+		
+
 class RequestOpMetadata:
 	
 	latency_std = 0.0
@@ -154,6 +157,32 @@ class TraceGenerator:
 			ev_list.sort(key=lambda x: x.order)
 			self.request_list.append(Request(req, ev_list, ev_list[0].rpc, ev_list[len(ev_list)-1].ts - ev_list[0].ts, ev_list[1].pid))
 
+	# Generate individual Zipkin-compatible traces
+	def generatezipkintraces(self):
+		for req in self.request_list:
+			filename = str(os.getcwd()) + "/zipkin/" + str(req.req_id) ".json"
+			fReq = fopen(filename, "w")
+			zipkin_string = "[\n"
+			spanlist = req.generatespanlist()
+			for i, span in enumerate(spanlist):
+				zipkin_string += "  {\n"
+				zipkin_string += "    \"traceId\": \"" + str(req.req_id) + "\",\n"
+				zipkin_string += "    \"name\": \"" + str(span.name) + "\",\n"
+				zipkin_string += "    \"id\": \"" + str(span.id) + "\",\n"
+				zipkin_string += "    \"parentId\": \"" + str(span.parent_id) + "\",\n"
+				zipkin_string += "    \"timestamp\": \"" + str(span.timestamp) + "\",\n"
+				zipkin_string += "    \"localEndpoint\": {\n      \"serviceName\": \"" + str(span.service_name) + "\"},\n"
+				zipkin_string += "    \"annotations\": [{\n      \"timestamp\": \"" + str(span.start_ts) + "\", \"value\": \"" + str(span.start_val) + "},\n"
+				zipkin_string += "                      {\n      \"timestamp\": \"" + str(span.end_ts) + "\", \"value\": \"" + str(span.end_val) + "}]\n"
+				if( i < (len(spanlist)-1)):
+					zipkin_string += "  },\n"
+				else:
+					zipkin_string += "  }\n"
+			zipkin_string += "]\n"
+			fReq.flush()
+			fReq.close()
+			
+
 	# For every op, generate the times series data of ts, latency, ABT queue info, memory info, etc.
 	def generatereqmetadata(self):
 		request_time_series_data = defaultdict(list)
@@ -195,6 +224,7 @@ def main():
 	t = TraceGenerator()
 	t.readfiles()
 	t.sorteventsinrequest()
+	t.generatezipkintraces()
 	t.generatereqmetadata()
 	t.finalize()
 
