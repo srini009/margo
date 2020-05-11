@@ -34,7 +34,7 @@ class Event:
 		self.pid = pid
 
 class Span:
-	def __init__(self, name, id_, service_name, start_ts, end_ts, ts, start_type, end_type, address):
+	def __init__(self, name, id_, service_name, start_ts, end_ts, ts, start_type, end_type, address, parent_span):
 		self.ts = ts
 		self.start_ts = start_ts
 		self.address = address
@@ -44,6 +44,8 @@ class Span:
 		self.name = name
 		self.service_name = service_name
 		self.id = id_
+		self.parent_span = parent_span
+		self.duration = (end_ts - start_ts)
 
 class Request:
 
@@ -64,18 +66,20 @@ class Request:
 		elif(type_ == 3):
 			return "cr"
 
-	def __generatenextspan(self, start, end, name, id_, pidtohost):
+	def __generatenextspan(self, start, end, name, id_, pidtohost, parent_span):
 		service_name = (name.split("_"))[0]
 		address = pidtohost[int(start.pid)]
-		print (address)
-		return Span(name, id_, service_name, start.ts, end.ts, start.ts, self.get_type_string(start.ev), self.get_type_string(end.ev), address) 
+		return Span(name, id_, service_name, start.ts, end.ts, start.ts, self.get_type_string(start.ev), self.get_type_string(end.ev), address, parent_span) 
 		
 	def generatespanlist(self, rpc2name, pidtohost):
 		spanlist = []
 		current_event_list = self.sorted_event_list[:]
 		span_id_ = 0
+		level_map = dict()
+		num_half_peels = 0
+		num_full_peels = 0
+			
 		while(len(current_event_list) > 0 and (len(current_event_list) % 2 == 0)): #Some sanity checking is required because of poor trace quality in some scenarios
-			#print len(current_event_list)
 			start_ev = current_event_list[0]
 			#print ("Start is ", start_ev.ev, rpc2name.get(int(start_ev.rpc), "UNKNOWN_RPC_OP"))
 			end_ev_index = -1
@@ -96,7 +100,30 @@ class Request:
 			#print ("End is ", end_ev.ev, rpc2name.get(int(end_ev.rpc), "UNKNOWN_RPC_OP"))
 			name = rpc2name.get(int(start_ev.rpc), "UNKNOWN_RPC_OP")
 			span_id = str(span_id_) + "_" + str(self.req_id)
-			spanlist.append(self.__generatenextspan(start_ev, end_ev, name, span_id, pidtohost))
+
+			#Find parent span by iterating through already seen spans
+			#and finding the span with the end index closest to current span's end index
+			parent_span = -1
+			diff = 1000000
+			#Store actual end index in the level map
+			level_map[span_id_] =  num_half_peels + 2*num_full_peels + (end_ev_index + 1)
+			#print ("Level map is ",  level_map[span_id_], " half peels, ", num_half_peels, ", full peels ", num_full_peels)
+
+			for s, end in level_map.items():
+				diff_ = (end - level_map[span_id_])
+				#print "Current span id_, current diff, potential parent ", span_id_, diff, s
+				if((diff_ > 0) and diff_ < diff):
+					diff = diff_
+					parent_span = s
+
+			level_map[span_id_] =  num_half_peels + 2*num_full_peels + (end_ev_index + 1)
+
+			if(end_ev_index != 0):
+				num_half_peels += 1
+			else:
+				num_full_peels += 1
+			
+			spanlist.append(self.__generatenextspan(start_ev, end_ev, name, span_id, pidtohost, parent_span))
 			current_event_list.pop(0)
 			current_event_list.pop(end_ev_index)
 			span_id_ += 1
@@ -198,7 +225,7 @@ class TraceGenerator:
 			pid = contents[1] #Second line is always pid
 			self.pidtohost[int(pid)] = (str(hostname))
 			num_registered_rpcs = int(contents[2]) #First line is always number of RPC's registered with the margo instance generating this file
-			rpc_contents = contents[3:num_registered_rpcs]
+			rpc_contents = contents[3:3 + num_registered_rpcs - 1]
 			for i in range(0, len(rpc_contents)):
 				op_id, op_name = rpc_contents[i].split(",")
 				self.rpc2name[int(op_id)] = str(op_name)
@@ -234,7 +261,9 @@ class TraceGenerator:
 				zipkin_string += "    \"traceId\": \"" + str(req.req_id).strip() + "\",\n"
 				zipkin_string += "    \"name\": \"" + str(span.name).strip() + "\",\n"
 				zipkin_string += "    \"id\": \"" + str(span.id) + "\",\n"
-				#zipkin_string += "    \"parentId\": \"" + str(span.parent_id) + "\",\n"
+				if(span.parent_span > -1):
+					zipkin_string += "    \"parentId\": \"" + str(span.parent_span) + "_" + str(req.req_id).strip() + "\",\n"
+					#zipkin_string += "    \"duration\": \"" + str(span.duration) + "\", \n"
 				zipkin_string += "    \"timestamp\": \"" + "{:.9f}".format(span.ts) + "\",\n"
 				zipkin_string += "    \"localEndpoint\": {\n      \"serviceName\": \"" + str(span.service_name).strip() + "\",\n      \"address\": \"" + str(span.address).strip("\n") + "\"},\n"
 				zipkin_string += "    \"annotations\": [{\n      \"timestamp\": \"" + "{:.9f}".format(span.start_ts) + "\", \"value\": \"" + str(span.start_type) + "\"},\n"
