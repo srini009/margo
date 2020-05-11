@@ -34,9 +34,10 @@ class Event:
 		self.pid = pid
 
 class Span:
-	def __init__(self, name, id_, service_name, start_ts, end_ts, ts, start_type, end_type):
+	def __init__(self, name, id_, service_name, start_ts, end_ts, ts, start_type, end_type, address):
 		self.ts = ts
 		self.start_ts = start_ts
+		self.address = address
 		self.end_ts = end_ts
 		self.start_type = start_type
 		self.end_type = end_type
@@ -63,11 +64,13 @@ class Request:
 		elif(type_ == 3):
 			return "cr"
 
-	def __generatenextspan(self, start, end, name, id_):
+	def __generatenextspan(self, start, end, name, id_, pidtohost):
 		service_name = (name.split("_"))[0]
-		return Span(name, id_, service_name, start.ts, end.ts, start.ts, self.get_type_string(start.ev), self.get_type_string(end.ev)) 
+		address = pidtohost[int(start.pid)]
+		print (address)
+		return Span(name, id_, service_name, start.ts, end.ts, start.ts, self.get_type_string(start.ev), self.get_type_string(end.ev), address) 
 		
-	def generatespanlist(self, rpc2name):
+	def generatespanlist(self, rpc2name, pidtohost):
 		spanlist = []
 		current_event_list = self.sorted_event_list[:]
 		span_id_ = 0
@@ -79,7 +82,7 @@ class Request:
 			for index, ev in enumerate(current_event_list[1:]):
 				#print ("Event encountered ", ev.ev, rpc2name.get(int(ev.rpc), "UNKNOWN_RPC_OP"), " at index ", index)
 				if(start_ev.ev == 0):
-					if (ev.rpc == start_ev.rpc) and (ev.ev == 3):
+					if (ev.rpc == start_ev.rpc) and (ev.mid == start_ev.mid) and (ev.ev == 3):
 						end_ev_index = index
 						break
 				elif(start_ev.ev == 1):
@@ -93,7 +96,7 @@ class Request:
 			#print ("End is ", end_ev.ev, rpc2name.get(int(end_ev.rpc), "UNKNOWN_RPC_OP"))
 			name = rpc2name.get(int(start_ev.rpc), "UNKNOWN_RPC_OP")
 			span_id = str(span_id_) + "_" + str(self.req_id)
-			spanlist.append(self.__generatenextspan(start_ev, end_ev, name, span_id))
+			spanlist.append(self.__generatenextspan(start_ev, end_ev, name, span_id, pidtohost))
 			current_event_list.pop(0)
 			current_event_list.pop(end_ev_index)
 			span_id_ += 1
@@ -225,7 +228,7 @@ class TraceGenerator:
 			filename = dir_ + str(req.req_id) + ".json"
 			fReq = open(filename, "w")
 			zipkin_string = "[\n"
-			spanlist = req.generatespanlist(self.rpc2name)
+			spanlist = req.generatespanlist(self.rpc2name, self.pidtohost)
 			for i, span in enumerate(spanlist):
 				zipkin_string += "  {\n"
 				zipkin_string += "    \"traceId\": \"" + str(req.req_id).strip() + "\",\n"
@@ -233,7 +236,7 @@ class TraceGenerator:
 				zipkin_string += "    \"id\": \"" + str(span.id) + "\",\n"
 				#zipkin_string += "    \"parentId\": \"" + str(span.parent_id) + "\",\n"
 				zipkin_string += "    \"timestamp\": \"" + "{:.9f}".format(span.ts) + "\",\n"
-				zipkin_string += "    \"localEndpoint\": {\n      \"serviceName\": \"" + str(span.service_name).strip() + "\"},\n"
+				zipkin_string += "    \"localEndpoint\": {\n      \"serviceName\": \"" + str(span.service_name).strip() + "\",\n      \"address\": \"" + str(span.address).strip("\n") + "\"},\n"
 				zipkin_string += "    \"annotations\": [{\n      \"timestamp\": \"" + "{:.9f}".format(span.start_ts) + "\", \"value\": \"" + str(span.start_type) + "\"},\n"
 				zipkin_string += "                      {\n      \"timestamp\": \"" + "{:.9f}".format(span.end_ts) + "\", \"value\": \"" + str(span.end_type) + "\"}]\n"
 				if( i < (len(spanlist)-1)):
