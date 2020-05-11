@@ -75,7 +75,7 @@ class Request:
 		address = pidtohost[int(start.pid)]
 		return Span(name, id_, service_name, start.ts, end.ts, start.ts, self.get_type_string(start.ev), self.get_type_string(end.ev), address, parent_span) 
 		
-	def generatespanlist(self, rpc2name, pidtohost):
+	def generatespanlist(self, rpc2name, pidtohost, debug=False):
 		spanlist = []
 		current_event_list = self.sorted_event_list[:]
 		span_id_ = 0
@@ -85,10 +85,12 @@ class Request:
 			
 		while(len(current_event_list) > 0 and (len(current_event_list) % 2 == 0)): #Some sanity checking is required because of poor trace quality in some scenarios
 			start_ev = current_event_list[0]
-			#print ("Start is ", start_ev.ev, rpc2name.get(int(start_ev.rpc), "UNKNOWN_RPC_OP"))
+			if debug == True:
+				print ("Start is ", start_ev.ev, rpc2name.get(int(start_ev.rpc), "UNKNOWN_RPC_OP"))
 			end_ev_index = -1
 			for index, ev in enumerate(current_event_list[1:]):
-				#print ("Event encountered ", ev.ev, rpc2name.get(int(ev.rpc), "UNKNOWN_RPC_OP"), " at index ", index)
+				if debug == True:
+					print ("Event encountered ", ev.ev, rpc2name.get(int(ev.rpc), "UNKNOWN_RPC_OP"), " at index ", index, " and order ", ev.order)
 				if(start_ev.ev == 0):
 					if (ev.rpc == start_ev.rpc) and (ev.mid == start_ev.mid) and (ev.ev == 3):
 						end_ev_index = index
@@ -101,7 +103,8 @@ class Request:
 				current_event_list.pop(0)
 				continue
 			end_ev = current_event_list[end_ev_index+1]	
-			#print ("End is ", end_ev.ev, rpc2name.get(int(end_ev.rpc), "UNKNOWN_RPC_OP"))
+			if debug == True:
+				print ("End is ", end_ev.ev, rpc2name.get(int(end_ev.rpc), "UNKNOWN_RPC_OP"))
 			name = rpc2name.get(int(start_ev.rpc), "UNKNOWN_RPC_OP")
 			span_id = str(span_id_) + "_" + str(self.req_id)
 
@@ -111,11 +114,13 @@ class Request:
 			diff = 1000000
 			#Store actual end index in the level map
 			level_map[span_id_] =  num_half_peels + 2*num_full_peels + (end_ev_index + 1)
-			#print ("Level map is ",  level_map[span_id_], " half peels, ", num_half_peels, ", full peels ", num_full_peels)
+			if debug == True:
+				print ("Level map is ",  level_map[span_id_], " half peels, ", num_half_peels, ", full peels ", num_full_peels)
 
 			for s, end in level_map.items():
 				diff_ = (end - level_map[span_id_])
-				#print "Current span id_, current diff, potential parent ", span_id_, diff, s
+				if debug == True:
+					print "Current span id_, current diff, potential parent ", span_id_, diff, s
 				if((diff_ > 0) and diff_ < diff):
 					diff = diff_
 					parent_span = s
@@ -259,7 +264,8 @@ class TraceGenerator:
 			filename = dir_ + str(req.req_id) + ".json"
 			fReq = open(filename, "w")
 			zipkin_string = "[\n"
-			spanlist = req.generatespanlist(self.rpc2name, self.pidtohost)
+			debug = False
+			spanlist = req.generatespanlist(self.rpc2name, self.pidtohost, debug)
 			for i, span in enumerate(spanlist):
 				zipkin_string += "  {\n"
 				zipkin_string += "    \"traceId\": \"" + str(req.req_id).strip() + "\",\n"
