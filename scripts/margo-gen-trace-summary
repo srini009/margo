@@ -33,6 +33,17 @@ class Event:
 		self.max_rss = max_rss
 		self.pid = pid
 
+class Span:
+	def __init__(self, name, id_, service_name, start_ts, end_ts, ts, start_type, end_type):
+		self.ts = ts
+		self.start_ts = start_ts
+		self.end_ts = end_ts
+		self.start_type = start_type
+		self.end_type = end_type
+		self.name = name
+		self.service_name = service_name
+		self.id = id_
+
 class Request:
 
 	def __init__(self, req_id, sorted_event_list, op, latency, pid):
@@ -42,7 +53,53 @@ class Request:
 		self.latency = latency
 		self.pid = pid
 
-	def generatespanlist(self):
+	def get_type_string(self, type_):
+		if(type_ == 0):
+			return "cs"
+		elif(type_ == 1):
+			return "sr"
+		elif(type_ == 2):
+			return "ss"
+		elif(type_ == 3):
+			return "cr"
+
+	def __generatenextspan(self, start, end, name, id_):
+		service_name = (name.split("_"))[0]
+		return Span(name, id_, service_name, start.ts, end.ts, start.ts, self.get_type_string(start.ev), self.get_type_string(end.ev)) 
+		
+	def generatespanlist(self, rpc2name):
+		spanlist = []
+		current_event_list = self.sorted_event_list[:]
+		span_id_ = 0
+		while(len(current_event_list) > 0 and (len(current_event_list) % 2 == 0)): #Some sanity checking is required because of poor trace quality in some scenarios
+			#print len(current_event_list)
+			start_ev = current_event_list[0]
+			#print ("Start is ", start_ev.ev, rpc2name.get(int(start_ev.rpc), "UNKNOWN_RPC_OP"))
+			end_ev_index = -1
+			for index, ev in enumerate(current_event_list[1:]):
+				#print ("Event encountered ", ev.ev, rpc2name.get(int(ev.rpc), "UNKNOWN_RPC_OP"), " at index ", index)
+				if(start_ev.ev == 0):
+					if (ev.rpc == start_ev.rpc) and (ev.ev == 3):
+						end_ev_index = index
+						break
+				elif(start_ev.ev == 1):
+					if (ev.rpc == start_ev.rpc) and (ev.ev == 2):
+						end_ev_index = index
+						break
+			if (end_ev_index == -1):
+				current_event_list.pop(0)
+				continue
+			end_ev = current_event_list[end_ev_index+1]	
+			#print ("End is ", end_ev.ev, rpc2name.get(int(end_ev.rpc), "UNKNOWN_RPC_OP"))
+			name = rpc2name.get(int(start_ev.rpc), "UNKNOWN_RPC_OP")
+			span_id = str(span_id_) + "_" + str(self.req_id)
+			spanlist.append(self.__generatenextspan(start_ev, end_ev, name, span_id))
+			current_event_list.pop(0)
+			current_event_list.pop(end_ev_index)
+			span_id_ += 1
+
+		return spanlist
+		
 		
 
 class RequestOpMetadata:
@@ -159,26 +216,32 @@ class TraceGenerator:
 
 	# Generate individual Zipkin-compatible traces
 	def generatezipkintraces(self):
+		dir_ = str(os.getcwd()) + "/zipkin_traces/"
+		try:
+			os.mkdir(dir_)
+		except:
+			print ("Zipkin directory already exists")
 		for req in self.request_list:
-			filename = str(os.getcwd()) + "/zipkin/" + str(req.req_id) ".json"
-			fReq = fopen(filename, "w")
+			filename = dir_ + str(req.req_id) + ".json"
+			fReq = open(filename, "w")
 			zipkin_string = "[\n"
-			spanlist = req.generatespanlist()
+			spanlist = req.generatespanlist(self.rpc2name)
 			for i, span in enumerate(spanlist):
 				zipkin_string += "  {\n"
-				zipkin_string += "    \"traceId\": \"" + str(req.req_id) + "\",\n"
-				zipkin_string += "    \"name\": \"" + str(span.name) + "\",\n"
+				zipkin_string += "    \"traceId\": \"" + str(req.req_id).strip() + "\",\n"
+				zipkin_string += "    \"name\": \"" + str(span.name).strip() + "\",\n"
 				zipkin_string += "    \"id\": \"" + str(span.id) + "\",\n"
-				zipkin_string += "    \"parentId\": \"" + str(span.parent_id) + "\",\n"
-				zipkin_string += "    \"timestamp\": \"" + str(span.timestamp) + "\",\n"
-				zipkin_string += "    \"localEndpoint\": {\n      \"serviceName\": \"" + str(span.service_name) + "\"},\n"
-				zipkin_string += "    \"annotations\": [{\n      \"timestamp\": \"" + str(span.start_ts) + "\", \"value\": \"" + str(span.start_val) + "},\n"
-				zipkin_string += "                      {\n      \"timestamp\": \"" + str(span.end_ts) + "\", \"value\": \"" + str(span.end_val) + "}]\n"
+				#zipkin_string += "    \"parentId\": \"" + str(span.parent_id) + "\",\n"
+				zipkin_string += "    \"timestamp\": \"" + "{:.9f}".format(span.ts) + "\",\n"
+				zipkin_string += "    \"localEndpoint\": {\n      \"serviceName\": \"" + str(span.service_name).strip() + "\"},\n"
+				zipkin_string += "    \"annotations\": [{\n      \"timestamp\": \"" + "{:.9f}".format(span.start_ts) + "\", \"value\": \"" + str(span.start_type) + "\"},\n"
+				zipkin_string += "                      {\n      \"timestamp\": \"" + "{:.9f}".format(span.end_ts) + "\", \"value\": \"" + str(span.end_type) + "\"}]\n"
 				if( i < (len(spanlist)-1)):
 					zipkin_string += "  },\n"
 				else:
 					zipkin_string += "  }\n"
 			zipkin_string += "]\n"
+			fReq.write(zipkin_string)
 			fReq.flush()
 			fReq.close()
 			
