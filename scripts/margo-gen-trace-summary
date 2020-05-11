@@ -68,6 +68,10 @@ class Request:
 
 	def __generatenextspan(self, start, end, name, id_, pidtohost, parent_span):
 		service_name = (name.split("_"))[0]
+		if(start.ev == 0):
+			service_name += "_CLIENT"
+		else:
+			service_name += "_SERVER"
 		address = pidtohost[int(start.pid)]
 		return Span(name, id_, service_name, start.ts, end.ts, start.ts, self.get_type_string(start.ev), self.get_type_string(end.ev), address, parent_span) 
 		
