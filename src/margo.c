@@ -596,7 +596,7 @@ static void margo_read_pvar_data() {
 
    for(int i = 0; i < 5; i++) {
      HG_Prof_pvar_read(pvar_session, pvar_handle[i], (void*)buf);
-     fprintf(stderr, "[MARGO] PVAR at index %d now has a value: %d\n", i, *(double *)buf);
+     fprintf(stderr, "[MARGO] PVAR at index %d now has a value: %f\n", i, *(double *)buf);
    }
 }
 
