@@ -39,8 +39,8 @@ static int g_margo_abt_init = 0;
 
 /* Mercury Profiling Interface */
 static hg_prof_pvar_session_t pvar_session;
-static hg_prof_pvar_handle_t pvar_handle;
-static int pvar_count;
+static hg_prof_pvar_handle_t *pvar_handle;
+static int *pvar_count;
 static void margo_initialize_mercury_profiling_interface(hg_class_t *hg_class);
 static void margo_finalize_mercury_profiling_interface(hg_class_t *hg_class);
 static void margo_read_pvar_data();
@@ -554,23 +554,34 @@ static void margo_initialize_mercury_profiling_interface(hg_class_t *hg_class) {
        hg_prof_datatype_t pvar_datatype;
        hg_prof_bind_t pvar_bind;
        HG_Prof_init(hg_class);
-       HG_Prof_pvar_get_info(hg_class, 0, name, &name_len, &pvar_class, &pvar_datatype, desc, &desc_len, &pvar_bind, &continuous);
-       fprintf(stderr, "[MARGO] PVAR at index 0 has name: %s, name_len: %d, pvar_class: %d, pvar_datatype: %d, desc: %s, desc_len: %d, pvar_bind: %d, continuous_flag: %d\n", name, name_len, pvar_class, pvar_datatype, desc, desc_len, pvar_bind, continuous);
+       //HG_Prof_pvar_get_info(hg_class, 0, name, &name_len, &pvar_class, &pvar_datatype, desc, &desc_len, &pvar_bind, &continuous);
+       //fprintf(stderr, "[MARGO] PVAR at index 0 has name: %s, name_len: %d, pvar_class: %d, pvar_datatype: %d, desc: %s, desc_len: %d, pvar_bind: %d, continuous_flag: %d\n", name, name_len, pvar_class, pvar_datatype, desc, desc_len, pvar_bind, continuous);
+       int num_pvars;
+       num_pvars = HG_Prof_pvar_get_num(hg_class);
+       fprintf(stderr, "[MARGO] Num PVARs exported: %d\n", num_pvars);
        HG_Prof_pvar_session_create(hg_class, &pvar_session);
-       HG_Prof_pvar_handle_alloc(pvar_session, 0, NULL, &pvar_handle, &pvar_count);
+       pvar_handle = (hg_prof_pvar_handle_t*)malloc(num_pvars*sizeof(hg_prof_pvar_handle_t));
+       pvar_count = (int*)malloc(num_pvars*sizeof(int));
+       for(int i = 0 ; i < num_pvars; i++)
+         HG_Prof_pvar_handle_alloc(pvar_session, i, NULL, &(pvar_handle[i]), &(pvar_count[i]));
 }
 
 /* Finalize the Mercury Profiling Interface */
 static void margo_finalize_mercury_profiling_interface(hg_class_t *hg_class) {
        int ret;
 
-       ret = HG_Prof_pvar_handle_free(pvar_session, 0, &pvar_handle);
-       assert(ret == HG_SUCCESS);
+       int num_pvars = HG_Prof_pvar_get_num(hg_class);
+       for(int i = 0; i < num_pvars; i++) {
+         ret = HG_Prof_pvar_handle_free(pvar_session, 0, &(pvar_handle[i]));
+         assert(ret == HG_SUCCESS);
+       }
+
        ret = HG_Prof_pvar_session_destroy(hg_class, &pvar_session);
        assert(ret == HG_SUCCESS);
        ret = HG_Prof_finalize(hg_class);
        assert(ret == HG_SUCCESS);
-
+       free(pvar_count);
+       free(pvar_handle);
        fprintf(stderr, "[MARGO] Successfully shutdown profiling interface \n");
 }
 
@@ -580,11 +591,13 @@ static void margo_read_pvar_data() {
    /* Allocate buffer space for the handle based on the type and pvar_count
       Here, we know that the PVAR exported is of type unsigned int. But in reality, the type
       should be queried from the interface */
-   unsigned int * buf;
-   buf = (unsigned int *)malloc(sizeof(unsigned int)*pvar_count);
-   HG_Prof_pvar_read(pvar_session, pvar_handle, (void*)buf);
+   void * buf;
+   buf = (double*)malloc(sizeof(double)*1);
 
-   fprintf(stderr, "[MARGO] PVAR at index 0 now has a value: %d\n", *(unsigned int *)buf);
+   for(int i = 0; i < 5; i++) {
+     HG_Prof_pvar_read(pvar_session, pvar_handle[i], (void*)buf);
+     fprintf(stderr, "[MARGO] PVAR at index %d now has a value: %d\n", i, *(double *)buf);
+   }
 }
 
 margo_instance_id margo_init_pool(ABT_pool progress_pool, ABT_pool handler_pool,
@@ -799,6 +812,8 @@ void margo_finalize(margo_instance_id mid)
       ABT_thread_free(&mid->sparkline_data_collection_tid);
       ABT_thread_join(mid->system_stats_collection_tid);
       ABT_thread_free(&mid->system_stats_collection_tid);
+
+      margo_read_pvar_data();
 
       margo_finalize_mercury_profiling_interface(mid->hg_class);
       margo_profile_dump(mid, "profile", 1);
@@ -1300,7 +1315,7 @@ static hg_return_t margo_cb(const struct hg_cb_info *info)
    
           /* Read the exported PVAR data from the Mercury Profiling Interface */
 	  /* As of now, Mercury only exports one PVAR: Number of times the HG_Forward call has been invoked */
-          margo_read_pvar_data();
+          //margo_read_pvar_data();
         }
     }
 
