@@ -172,8 +172,6 @@ struct margo_instance
     int diag_enabled;
     unsigned int profile_enabled;
     uint64_t self_addr_hash;
-    double previous_sparkline_data_collection_time;
-    double previous_system_stats_collection_time;
     uint16_t sparkline_index;
     uint16_t system_stats_index;
     struct diag_data diag_trigger_elapsed;
@@ -187,6 +185,7 @@ struct margo_instance
     unsigned int trace_id_counter;
     double trace_collection_start_time;
     ABT_mutex diag_rpc_mutex;
+
 };
 
 struct margo_request_struct {
@@ -454,8 +453,6 @@ margo_instance_id margo_init_opt(const char *addr_str, int mode, const struct hg
     /* start profiling if env variable MARGO_ENABLE_PROFILING is set */
     unsigned int profile = 0;
     mid->profile_enabled = 0;
-    mid->previous_sparkline_data_collection_time = ABT_get_wtime();
-    mid->previous_system_stats_collection_time = ABT_get_wtime();
     mid->sparkline_index = 0;
     mid->system_stats_index = 0;
 
@@ -1966,7 +1963,6 @@ static void sparkline_data_collection_fn(void* foo)
           }
         }
         mid->sparkline_index++;
-        mid->previous_sparkline_data_collection_time = ABT_get_wtime();
    }
 
    return;
@@ -2031,7 +2027,6 @@ static void system_stats_collection_fn(void* foo)
 
         mid->system_stats[mid->system_stats_index].ts = ABT_get_wtime();
         mid->system_stats_index++;
-        mid->previous_system_stats_collection_time = ABT_get_wtime();
    }
 
    return;
@@ -2439,7 +2434,6 @@ void margo_profile_dump(margo_instance_id mid, const char* file, int uniquify)
     if(outfile != stdout)
         fclose(outfile);
    
-    fprintf(stderr, "Instance %lu has %d trace record_entries\n", hash, mid->trace_record_index); 
     return;
 }
 
@@ -2554,6 +2548,8 @@ void margo_trace_dump(margo_instance_id mid, const char* file, int uniquify)
          fprintf(outfile, "{\"name\":\"%lu\", \"cat\": \"PERF\", \"ph\":\"E\", \"pid\": %lu, \"ts\": %f, \"trace_id\": %lu},\n", mid->trace_records[i].rpc, mid->trace_records[i].metadata.mid, (mid->trace_records[i].ts - mid->trace_collection_start_time), mid->trace_records[i].trace_id);
       }*/
     }
+
+    fprintf(stderr, "Instance %lu has %d trace record_entries\n", hash, mid->trace_record_index); 
 
     if(outfile != stdout)
         fclose(outfile);
