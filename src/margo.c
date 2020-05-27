@@ -43,7 +43,7 @@ static hg_prof_pvar_handle_t *pvar_handle;
 static int *pvar_count;
 static void margo_initialize_mercury_profiling_interface(hg_class_t *hg_class);
 static void margo_finalize_mercury_profiling_interface(hg_class_t *hg_class);
-static void margo_read_pvar_data();
+static void margo_read_pvar_data(margo_instance_id mid);
 
 /* Structure to store timing information */
 struct diag_data
@@ -179,6 +179,10 @@ struct margo_instance
     struct diag_data diag_progress_elapsed_nonzero_timeout;
     struct diag_data diag_progress_timeout_value;
     struct diag_data diag_bulk_create_elapsed;
+    struct diag_data diag_input_serialization_elapsed;
+    struct diag_data diag_input_deserialization_elapsed;
+    struct diag_data diag_output_serialization_elapsed;
+    struct diag_data diag_output_deserialization_elapsed;
     struct diag_data *diag_rpc;
     margo_trace_record * trace_records;
     margo_system_stat * system_stats;
@@ -556,7 +560,7 @@ static void margo_initialize_mercury_profiling_interface(hg_class_t *hg_class) {
        //fprintf(stderr, "[MARGO] PVAR at index 0 has name: %s, name_len: %d, pvar_class: %d, pvar_datatype: %d, desc: %s, desc_len: %d, pvar_bind: %d, continuous_flag: %d\n", name, name_len, pvar_class, pvar_datatype, desc, desc_len, pvar_bind, continuous);
        int num_pvars;
        num_pvars = HG_Prof_pvar_get_num(hg_class);
-       fprintf(stderr, "[MARGO] Num PVARs exported: %d\n", num_pvars);
+       //fprintf(stderr, "[MARGO] Num PVARs exported: %d\n", num_pvars);
        HG_Prof_pvar_session_create(hg_class, &pvar_session);
        pvar_handle = (hg_prof_pvar_handle_t*)malloc(num_pvars*sizeof(hg_prof_pvar_handle_t));
        pvar_count = (int*)malloc(num_pvars*sizeof(int));
@@ -580,22 +584,29 @@ static void margo_finalize_mercury_profiling_interface(hg_class_t *hg_class) {
        assert(ret == HG_SUCCESS);
        free(pvar_count);
        free(pvar_handle);
-       fprintf(stderr, "[MARGO] Successfully shutdown profiling interface \n");
+       //fprintf(stderr, "[MARGO] Successfully shutdown profiling interface \n");
 }
 
 /* As of now, there is only one PVAR that mercury exports. Read the value of that PVAR only. 
    This function should ultimately be capable of sampling any/all of the PVARs exported by Mercury */
-static void margo_read_pvar_data() {
-   /* Allocate buffer space for the handle based on the type and pvar_count
-      Here, we know that the PVAR exported is of type unsigned int. But in reality, the type
-      should be queried from the interface */
+static void margo_read_pvar_data(margo_instance_id mid) {
+   /* Allocate buffer space for the handle based on the type and pvar_count */
    void * buf;
    buf = (double*)malloc(sizeof(double)*1);
 
-   for(int i = 0; i < 5; i++) {
+   HG_Prof_pvar_read(pvar_session, pvar_handle[1], (void*)buf);
+   __DIAG_UPDATE(mid->diag_input_serialization_elapsed, *(double *)buf);
+   HG_Prof_pvar_read(pvar_session, pvar_handle[2], (void*)buf);
+   __DIAG_UPDATE(mid->diag_input_deserialization_elapsed, *(double *)buf);
+   HG_Prof_pvar_read(pvar_session, pvar_handle[3], (void*)buf);
+   __DIAG_UPDATE(mid->diag_output_deserialization_elapsed, *(double *)buf);
+   HG_Prof_pvar_read(pvar_session, pvar_handle[4], (void*)buf);
+   __DIAG_UPDATE(mid->diag_output_serialization_elapsed, *(double *)buf);
+
+   /*for(int i = 0; i < 5; i++) {
      HG_Prof_pvar_read(pvar_session, pvar_handle[i], (void*)buf);
      fprintf(stderr, "[MARGO] PVAR at index %d now has a value: %f\n", i, *(double *)buf);
-   }
+   }*/
 }
 
 margo_instance_id margo_init_pool(ABT_pool progress_pool, ABT_pool handler_pool,
@@ -811,7 +822,7 @@ void margo_finalize(margo_instance_id mid)
       ABT_thread_join(mid->system_stats_collection_tid);
       ABT_thread_free(&mid->system_stats_collection_tid);
 
-      margo_read_pvar_data();
+      margo_read_pvar_data(mid);
 
       margo_finalize_mercury_profiling_interface(mid->hg_class);
       margo_profile_dump(mid, "profile", 1);
@@ -1312,8 +1323,7 @@ static hg_return_t margo_cb(const struct hg_cb_info *info)
           margo_internal_generate_trace_event(mid, req->trace_id, cr, req->current_rpc, (*temp) + 1);
    
           /* Read the exported PVAR data from the Mercury Profiling Interface */
-	  /* As of now, Mercury only exports one PVAR: Number of times the HG_Forward call has been invoked */
-          //margo_read_pvar_data();
+          margo_read_pvar_data(mid);
         }
     }
 
@@ -1622,6 +1632,8 @@ hg_return_t margo_respond(
     
       /* the "1" indicates that this a target-side breadcrumb */
       margo_breadcrumb_measure(mid, treq->rpc_breadcrumb, treq->start_time, 1, treq->provider_id, treq->server_addr_hash, handle);
+
+      margo_read_pvar_data(mid);
 
       ABT_key_get(request_order_key, (void**)(&order));
 
@@ -2341,9 +2353,9 @@ void margo_diag_dump(margo_instance_id mid, const char* file, int uniquify)
     fprintf(outfile, "# Margo diagnostics\n");
     GET_SELF_ADDR_STR(mid, name);
     HASH_JEN(name, strlen(name), hash); /*record own address in the breadcrumb */
-    fprintf(outfile, "#Addr Hash and Address Name: %lu,%s\n", hash, name);
+    fprintf(outfile, "# Addr Hash and Address Name: %lu,%s\n", hash, name);
     fprintf(outfile, "# %s\n", ctime(&ltime));
-    fprintf(outfile, "# Function Name, Average Time Per Call, Cumulative Time, Highwatermark, Lowwatermark, Call Count\n");
+    fprintf(outfile, "# Function Name, Average Time Per Call, Cumulative Time, Lowwatermark, Highwatermark, Call Count\n");
     
     print_diag_data(mid, outfile, "trigger_elapsed", 
         "Time consumed by HG_Trigger()", 
@@ -2357,6 +2369,18 @@ void margo_diag_dump(margo_instance_id mid, const char* file, int uniquify)
     print_diag_data(mid, outfile, "bulk_create_elapsed",
         "Time consumed by HG_Bulk_create()",
         &mid->diag_bulk_create_elapsed);
+    print_diag_data(mid, outfile, "input_serialization_elapsed",
+        "Time consumed by hg_set_struct()",
+        &mid->diag_input_serialization_elapsed);
+    print_diag_data(mid, outfile, "input_deserialization_elapsed",
+        "Time consumed by HG_Get_input()",
+        &mid->diag_input_deserialization_elapsed);
+    print_diag_data(mid, outfile, "output_serialization_elapsed",
+        "Time consumed by hg_set_struct()",
+        &mid->diag_output_serialization_elapsed);
+    print_diag_data(mid, outfile, "output_deserialization_elapsed",
+        "Time consumed by HG_Get_output()",
+        &mid->diag_output_deserialization_elapsed);
 
     if(outfile != stdout)
         fclose(outfile);
@@ -2565,7 +2589,7 @@ void margo_trace_dump(margo_instance_id mid, const char* file, int uniquify)
       }*/
     }
 
-    fprintf(stderr, "Instance %lu has %d trace record_entries\n", hash, mid->trace_record_index); 
+    fprintf(stderr, "Margo Instance has %d trace record_entries\n", mid->trace_record_index); 
 
     if(outfile != stdout)
         fclose(outfile);
