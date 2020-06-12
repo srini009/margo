@@ -38,12 +38,12 @@ static int g_margo_abt_init = 0;
 
 
 /* Mercury Profiling Interface */
-static hg_prof_pvar_session_t pvar_session;
+/*static hg_prof_pvar_session_t pvar_session;
 static hg_prof_pvar_handle_t *pvar_handle;
 static int *pvar_count;
 static void margo_initialize_mercury_profiling_interface(hg_class_t *hg_class);
 static void margo_finalize_mercury_profiling_interface(hg_class_t *hg_class);
-static void margo_read_pvar_data(margo_instance_id mid);
+static void margo_read_pvar_data(margo_instance_id mid);*/
 
 /* Structure to store timing information */
 struct diag_data
@@ -493,7 +493,7 @@ margo_instance_id margo_init_opt(const char *addr_str, int mode, const struct hg
        mid->trace_collection_start_time = ABT_get_wtime();
 
        /* Initialize the Mercury Profiling Interface */
-       margo_initialize_mercury_profiling_interface(hg_class);
+       //margo_initialize_mercury_profiling_interface(hg_class);
 
     }
 
@@ -547,7 +547,7 @@ err:
 }
 
 /* Initialize the Mercury Profiling Interface */
-static void margo_initialize_mercury_profiling_interface(hg_class_t *hg_class) {
+/*static void margo_initialize_mercury_profiling_interface(hg_class_t *hg_class) {
 
        char name[128];
        char desc[128];
@@ -566,10 +566,10 @@ static void margo_initialize_mercury_profiling_interface(hg_class_t *hg_class) {
        pvar_count = (int*)malloc(num_pvars*sizeof(int));
        for(int i = 0 ; i < num_pvars; i++)
          HG_Prof_pvar_handle_alloc(pvar_session, i, NULL, &(pvar_handle[i]), &(pvar_count[i]));
-}
+}*/
 
 /* Finalize the Mercury Profiling Interface */
-static void margo_finalize_mercury_profiling_interface(hg_class_t *hg_class) {
+/*static void margo_finalize_mercury_profiling_interface(hg_class_t *hg_class) {
        int ret;
 
        int num_pvars = HG_Prof_pvar_get_num(hg_class);
@@ -585,12 +585,11 @@ static void margo_finalize_mercury_profiling_interface(hg_class_t *hg_class) {
        free(pvar_count);
        free(pvar_handle);
        //fprintf(stderr, "[MARGO] Successfully shutdown profiling interface \n");
-}
+}*/
 
 /* As of now, there is only one PVAR that mercury exports. Read the value of that PVAR only. 
    This function should ultimately be capable of sampling any/all of the PVARs exported by Mercury */
-static void margo_read_pvar_data(margo_instance_id mid) {
-   /* Allocate buffer space for the handle based on the type and pvar_count */
+/*static void margo_read_pvar_data(margo_instance_id mid) {
    void * buf;
    buf = (double*)malloc(sizeof(double)*1);
 
@@ -603,11 +602,11 @@ static void margo_read_pvar_data(margo_instance_id mid) {
    HG_Prof_pvar_read(pvar_session, pvar_handle[4], (void*)buf);
    __DIAG_UPDATE(mid->diag_output_serialization_elapsed, *(double *)buf);
 
-   /*for(int i = 0; i < 5; i++) {
+   for(int i = 0; i < 5; i++) {
      HG_Prof_pvar_read(pvar_session, pvar_handle[i], (void*)buf);
      fprintf(stderr, "[MARGO] PVAR at index %d now has a value: %f\n", i, *(double *)buf);
-   }*/
-}
+   }
+}*/
 
 margo_instance_id margo_init_pool(ABT_pool progress_pool, ABT_pool handler_pool,
     hg_context_t *hg_context)
@@ -822,9 +821,9 @@ void margo_finalize(margo_instance_id mid)
       ABT_thread_join(mid->system_stats_collection_tid);
       ABT_thread_free(&mid->system_stats_collection_tid);
 
-      margo_read_pvar_data(mid);
+      //margo_read_pvar_data(mid);
 
-      margo_finalize_mercury_profiling_interface(mid->hg_class);
+      //margo_finalize_mercury_profiling_interface(mid->hg_class);
       margo_profile_dump(mid, "profile", 1);
       margo_system_stats_dump(mid, "profile", 1);
       margo_trace_dump(mid, "profile", 1);
@@ -1323,7 +1322,7 @@ static hg_return_t margo_cb(const struct hg_cb_info *info)
           margo_internal_generate_trace_event(mid, req->trace_id, cr, req->current_rpc, (*temp) + 1);
    
           /* Read the exported PVAR data from the Mercury Profiling Interface */
-          margo_read_pvar_data(mid);
+          //margo_read_pvar_data(mid);
         }
     }
 
@@ -1633,7 +1632,7 @@ hg_return_t margo_respond(
       /* the "1" indicates that this a target-side breadcrumb */
       margo_breadcrumb_measure(mid, treq->rpc_breadcrumb, treq->start_time, 1, treq->provider_id, treq->server_addr_hash, handle);
 
-      margo_read_pvar_data(mid);
+      //margo_read_pvar_data(mid);
 
       ABT_key_get(request_order_key, (void**)(&order));
 
