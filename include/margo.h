@@ -36,6 +36,14 @@ typedef struct margo_instance* margo_instance_id;
 typedef struct margo_data* margo_data_ptr;
 typedef struct margo_request_struct* margo_request;
 
+struct custom_handle {
+  hg_handle_t handle;
+  ABT_timer timer;
+  double ts;
+};
+
+typedef struct custom_handle custom_handle;
+
 #define MARGO_INSTANCE_NULL ((margo_instance_id)NULL)
 #define MARGO_REQUEST_NULL ((margo_request)NULL)
 #define MARGO_CLIENT_MODE 0
@@ -1133,7 +1141,7 @@ void __margo_internal_decr_pending(margo_instance_id mid);
  * Internal function used by DEFINE_MARGO_RPC_HANDLER, not supposed to be
  * called by users!
  */
-void __margo_internal_pre_wrapper_hooks(margo_instance_id mid, hg_handle_t handle);
+void __margo_internal_pre_wrapper_hooks(margo_instance_id mid, hg_handle_t handle, double ts);
 
 /**
  * @private
@@ -1141,6 +1149,7 @@ void __margo_internal_pre_wrapper_hooks(margo_instance_id mid, hg_handle_t handl
  * called by users!
  */
 void __margo_internal_post_wrapper_hooks(margo_instance_id mid);
+void __margo_internal_start_server_time(margo_instance_id mid, hg_handle_t handle, double ts);
 
 /**
  * macro that registers a function as an RPC.
@@ -1163,13 +1172,14 @@ void __margo_internal_post_wrapper_hooks(margo_instance_id mid);
 
 #define __MARGO_INTERNAL_RPC_WRAPPER_BODY(__name) \
     margo_instance_id __mid; \
+    hg_handle_t handle = c->handle;\
     __mid = margo_hg_handle_get_instance(handle); \
-    __margo_internal_pre_wrapper_hooks(__mid, handle); \
+    __margo_internal_pre_wrapper_hooks(__mid, handle, c->ts); \
     __name(handle); \
     __margo_internal_post_wrapper_hooks(__mid);
 
 #define __MARGO_INTERNAL_RPC_WRAPPER(__name) \
-void _wrapper_for_##__name(hg_handle_t handle) { \
+void _wrapper_for_##__name(custom_handle *c) { \
     __MARGO_INTERNAL_RPC_WRAPPER_BODY(__name) \
 }
 
@@ -1179,10 +1189,13 @@ void _wrapper_for_##__name(hg_handle_t handle) { \
     margo_instance_id __mid; \
     __mid = margo_hg_handle_get_instance(handle); \
     if(__mid == MARGO_INSTANCE_NULL) { return(HG_OTHER_ERROR); } \
+    custom_handle *c = (custom_handle*)malloc(sizeof(custom_handle));\
+    c->handle = handle;\
+    c->ts = ABT_get_wtime();\
     if(__margo_internal_finalize_requested(__mid)) { return(HG_CANCELED); } \
     __pool = margo_hg_handle_get_handler_pool(handle); \
     __margo_internal_incr_pending(__mid); \
-    __ret = ABT_thread_create(__pool, (void (*)(void *))_wrapper_for_##__name, handle, ABT_THREAD_ATTR_NULL, NULL); \
+    __ret = ABT_thread_create(__pool, (void (*)(void *))_wrapper_for_##__name, (void*)c, ABT_THREAD_ATTR_NULL, NULL); \
     if(__ret != 0) { \
         return(HG_NOMEM_ERROR); \
     } \
