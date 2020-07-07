@@ -15,7 +15,7 @@ extern "C" {
 #include <mercury_types.h>
 #include <mercury_bulk.h>
 #include <mercury_macros.h>
-//#include <mercury_prof_interface.h>
+#include <mercury_prof_interface.h>
 #include <abt.h>
 
 #include <margo-diag.h>
@@ -1221,6 +1221,7 @@ hg_return_t _handler_for_##__name(hg_handle_t handle) { \
  */
 #define DECLARE_MARGO_RPC_HANDLER(__name) hg_return_t _handler_for_##__name(hg_handle_t handle);
 
+MERCURY_GEN_PROC(margo_shutdown_out_t, ((int32_t)(ret)));
 #ifdef __cplusplus
 }
 #endif
