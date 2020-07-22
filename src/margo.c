@@ -98,7 +98,7 @@ struct margo_handle_cache_el
 
 struct margo_finalize_cb
 {
-    void* owner;
+    const void* owner;
     void(*callback)(void*);
     void* uargs;
     struct margo_finalize_cb* next;
@@ -939,7 +939,7 @@ hg_bool_t margo_is_listening(
 
 void margo_push_prefinalize_callback(
             margo_instance_id mid,
-            void(*cb)(void*),
+            margo_finalize_callback_t cb,
             void* uargs)
 {
     margo_provider_push_prefinalize_callback(
@@ -955,10 +955,18 @@ int margo_pop_prefinalize_callback(
     return margo_provider_pop_prefinalize_callback(mid, NULL);
 }
 
+int margo_top_prefinalize_callback(
+                    margo_instance_id mid,
+                    margo_finalize_callback_t *cb,
+                    void** uargs)
+{   
+    return margo_provider_top_prefinalize_callback(mid, NULL, cb, uargs);
+}
+
 void margo_provider_push_prefinalize_callback(
             margo_instance_id mid,
-            void* owner,
-            void(*cb)(void*),                  
+            const void* owner,
+            margo_finalize_callback_t cb,
             void* uargs)
 {
     if(cb == NULL) return;
@@ -974,9 +982,32 @@ void margo_provider_push_prefinalize_callback(
     mid->prefinalize_cb = fcb;
 }
 
+int margo_provider_top_prefinalize_callback(
+            margo_instance_id mid,
+            const void* owner,
+            margo_finalize_callback_t *cb,
+            void** uargs)
+{
+    struct margo_finalize_cb* prev = NULL;
+    struct margo_finalize_cb* fcb  =  mid->prefinalize_cb;
+    while(fcb != NULL && fcb->owner != owner) {
+        prev = fcb;
+        fcb = fcb->next;
+    }
+    if(fcb == NULL) return 0;
+    if(prev == NULL) {
+        mid->prefinalize_cb = fcb->next;
+    } else {
+        prev->next = fcb->next;
+    }
+    if(cb) *cb = fcb->callback;
+    if(uargs) *uargs = fcb->uargs;
+    return 1;
+}
+
 int margo_provider_pop_prefinalize_callback(
             margo_instance_id mid,
-            void* owner)
+            const void* owner)
 {
     struct margo_finalize_cb* prev = NULL;
     struct margo_finalize_cb* fcb  =  mid->prefinalize_cb;
@@ -996,7 +1027,7 @@ int margo_provider_pop_prefinalize_callback(
 
 void margo_push_finalize_callback(
             margo_instance_id mid,
-            void(*cb)(void*),
+            margo_finalize_callback_t cb,
             void* uargs)
 {
     margo_provider_push_finalize_callback(
@@ -1012,10 +1043,18 @@ int margo_pop_finalize_callback(
     return margo_provider_pop_finalize_callback(mid, NULL);
 }
 
+int margo_top_finalize_callback(
+                    margo_instance_id mid,
+                    margo_finalize_callback_t *cb,
+                    void** uargs)
+{   
+    return margo_provider_top_finalize_callback(mid, NULL, cb, uargs);
+}
+
 void margo_provider_push_finalize_callback(
             margo_instance_id mid,
-            void* owner,
-            void(*cb)(void*),                  
+            const void* owner,
+            margo_finalize_callback_t cb,
             void* uargs)
 {
     if(cb == NULL) return;
@@ -1033,7 +1072,7 @@ void margo_provider_push_finalize_callback(
 
 int margo_provider_pop_finalize_callback(
             margo_instance_id mid,
-            void* owner)
+            const void* owner)
 {
     struct margo_finalize_cb* prev = NULL;
     struct margo_finalize_cb* fcb  =  mid->finalize_cb;
@@ -1048,6 +1087,29 @@ int margo_provider_pop_finalize_callback(
         prev->next = fcb->next;
     }
     free(fcb);
+    return 1;
+}
+
+int margo_provider_top_finalize_callback(
+            margo_instance_id mid,
+            const void* owner,
+            margo_finalize_callback_t *cb,
+            void** uargs)
+{
+    struct margo_finalize_cb* prev = NULL;
+    struct margo_finalize_cb* fcb  =  mid->finalize_cb;
+    while(fcb != NULL && fcb->owner != owner) {
+        prev = fcb;
+        fcb = fcb->next;
+    }
+    if(fcb == NULL) return 0;
+    if(prev == NULL) {
+        mid->finalize_cb = fcb->next;
+    } else {
+        prev->next = fcb->next;
+    }
+    if(cb) *cb = fcb->callback;
+    if(uargs) *uargs = fcb->uargs;
     return 1;
 }
 
@@ -1114,7 +1176,7 @@ hg_id_t margo_provider_register_name(margo_instance_id mid, const char *func_nam
         strncpy(tmp_rpc->func_name, func_name, 63);
         tmp_rpc->next = mid->registered_rpcs;
         mid->registered_rpcs = tmp_rpc;
-	mid->num_registered_rpcs += 1;
+        mid->num_registered_rpcs += 1;
     }
 
     ret = margo_register_internal(mid, id, in_proc_cb, out_proc_cb, rpc_cb, pool);
@@ -1159,23 +1221,23 @@ hg_return_t margo_register_data(
     void *data,
     void (*free_callback)(void *)) 
 {
-	struct margo_rpc_data* margo_data 
-		= (struct margo_rpc_data*) HG_Registered_data(mid->hg_class, id);
-	if(!margo_data) return HG_OTHER_ERROR;
+    struct margo_rpc_data* margo_data 
+        = (struct margo_rpc_data*) HG_Registered_data(mid->hg_class, id);
+    if(!margo_data) return HG_OTHER_ERROR;
     if(margo_data->user_data && margo_data->user_free_callback) {
         (margo_data->user_free_callback)(margo_data->user_data);
     }
-	margo_data->user_data = data;
-	margo_data->user_free_callback = free_callback;
-	return HG_SUCCESS;
+    margo_data->user_data = data;
+    margo_data->user_free_callback = free_callback;
+    return HG_SUCCESS;
 }
 
 void* margo_registered_data(margo_instance_id mid, hg_id_t id)
 {
-	struct margo_rpc_data* data
-		= (struct margo_rpc_data*) HG_Registered_data(margo_get_class(mid), id);
-	if(!data) return NULL;
-	else return data->user_data;
+    struct margo_rpc_data* data
+        = (struct margo_rpc_data*) HG_Registered_data(margo_get_class(mid), id);
+    if(!data) return NULL;
+    else return data->user_data;
 }
 
 hg_return_t margo_registered_disable_response(
@@ -1223,6 +1285,14 @@ hg_return_t margo_addr_lookup(
     hg_addr_t    *addr)
 {
     hg_return_t hret;
+
+#ifdef HG_Addr_lookup
+    /* Mercury 2.x provides two versions of lookup (async and sync).  Choose the
+     * former if available to avoid context switch
+     */
+    hret = HG_Addr_lookup2(mid->hg_class, name, addr);
+
+#else /* !defined HG_Addr_lookup */
     struct lookup_cb_evt *evt;
     ABT_eventual eventual;
     int ret;
@@ -1230,7 +1300,7 @@ hg_return_t margo_addr_lookup(
     ret = ABT_eventual_create(sizeof(*evt), &eventual);
     if(ret != 0)
     {
-        return(HG_NOMEM_ERROR);        
+        return(HG_NOMEM_ERROR);
     }
 
     hret = HG_Addr_lookup(mid->hg_context, margo_addr_lookup_cb,
@@ -1243,6 +1313,7 @@ hg_return_t margo_addr_lookup(
     }
 
     ABT_eventual_free(&eventual);
+#endif
 
     return(hret);
 }
@@ -2075,11 +2146,11 @@ margo_instance_id margo_hg_handle_get_instance(hg_handle_t h)
 
 static void margo_rpc_data_free(void* ptr)
 {
-	struct margo_rpc_data* data = (struct margo_rpc_data*) ptr;
-	if(data->user_data && data->user_free_callback) {
-		data->user_free_callback(data->user_data);
-	}
-	free(ptr);
+    struct margo_rpc_data* data = (struct margo_rpc_data*) ptr;
+    if(data->user_data && data->user_free_callback) {
+        data->user_free_callback(data->user_data);
+    }
+    free(ptr);
 }
 
 /* dedicated thread function to collect sparkline data */
@@ -2593,7 +2664,7 @@ void margo_profile_dump(margo_instance_id mid, const char* file, int uniquify)
             tmp_breadcrumb >>= (i*16);
             tmp_breadcrumb &= 0xffff;
 
-	    if(!tmp_breadcrumb) continue;
+            if(!tmp_breadcrumb) continue;
 
             if(i==3)
                 sprintf(&rpc_breadcrumb_str[i*7], "0x%.4lx", tmp_breadcrumb);
@@ -2736,12 +2807,12 @@ void margo_set_param(margo_instance_id mid, int option, const void *param)
         case MARGO_PARAM_PROGRESS_TIMEOUT_UB:
             mid->hg_progress_timeout_ub = (*((const unsigned int*)param));
             break;
-	case MARGO_PARAM_ENABLE_PROFILING:
-	    mid->profile_enabled = (*((const unsigned int*)param));
-	    break;
-	case MARGO_PARAM_ENABLE_DIAGNOSTICS:
-	    mid->diag_enabled = (*((const unsigned int*)param));
-	    break;
+        case MARGO_PARAM_ENABLE_PROFILING:
+            mid->profile_enabled = (*((const unsigned int*)param));
+            break;
+        case MARGO_PARAM_ENABLE_DIAGNOSTICS:
+            mid->diag_enabled = (*((const unsigned int*)param));
+            break;
     }
 
     return;
@@ -3054,7 +3125,7 @@ static void margo_breadcrumb_measure(margo_instance_id mid, uint64_t rpc_breadcr
         stat->type = type;
         stat->key.rpc_breadcrumb = rpc_breadcrumb;
         stat->key.addr_hash = hash;
-	stat->key.provider_id = provider_id;
+        stat->key.provider_id = provider_id;
         stat->x = x;
 
         /* initialize pool stats for breadcrumb */

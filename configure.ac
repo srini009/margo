@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.63])
-AC_INIT([margo], [0.6], [],[],[]) 
+AC_INIT([margo], [0.7], [],[],[]) 
 AC_CONFIG_MACRO_DIR([m4])
 LT_INIT
 
@@ -66,6 +66,9 @@ PKG_CHECK_MODULES([MERCURY],[mercury],[],
 LIBS="$MERCURY_LIBS $LIBS"
 CPPFLAGS="$MERCURY_CFLAGS $CPPFLAGS"
 CFLAGS="$MERCURY_CFLAGS $CFLAGS"
+# find the path containing the Mercury libraries
+MERCURY_LIB_PATH=`pkg-config --libs-only-L mercury | sed -e 's/-L//g'`
+AC_SUBST([MERCURY_LIB_PATH], ["$MERCURY_LIB_PATH"])
 
 PKG_CHECK_MODULES([ARGOBOTS],[argobots],[],
    [AC_MSG_ERROR([Could not find working argobots installation!])])
