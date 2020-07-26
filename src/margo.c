@@ -20,7 +20,9 @@
 #include "utlist.h"
 #include "uthash.h"
 
+#ifdef APEX_PROFILING
 #include "apex.h"
+#endif
 
 #define DEFAULT_MERCURY_PROGRESS_TIMEOUT_UB 100 /* 100 milliseconds */
 #define DEFAULT_MERCURY_HANDLE_CACHE_SIZE 32
@@ -40,11 +42,13 @@ static int g_margo_abt_init = 0;
 
 
 /* Mercury Profiling Interface */
+#ifdef MERCURY_PROFILING
 static hg_prof_pvar_session_t pvar_session;
 static hg_prof_pvar_handle_t *pvar_handle;
 static int *pvar_count;
 static void margo_initialize_mercury_profiling_interface(hg_class_t *hg_class);
 static void margo_finalize_mercury_profiling_interface(hg_class_t *hg_class);
+#endif
 static void margo_read_pvar_data(margo_instance_id mid);
 static void margo_internal_breadcrumb_handler_set(uint64_t rpc_breadcrumb);
  
@@ -401,6 +405,8 @@ margo_instance_id margo_init_opt(const char *addr_str, int mode, const struct hg
     int ret;
     struct margo_instance *mid = MARGO_INSTANCE_NULL;
 
+
+    #ifdef APEX_PROFILING
     /* APEX Initialize */
     int pid = getpid();
     char * mypid = malloc(11);   // ex. 34567
@@ -412,10 +418,10 @@ margo_instance_id margo_init_opt(const char *addr_str, int mode, const struct hg
     
     apex_init("apex_margo", my_rank, total_ranks);
     apex_set_untied_timers(1);
-
     apex_set_use_screen_output(1);
-    //fclose(fp);
-
+    fclose(fp);
+    #endif
+    
     if(mode != MARGO_CLIENT_MODE && mode != MARGO_SERVER_MODE) goto err;
 
     /* adjust argobots settings to suit Margo */
@@ -596,6 +602,7 @@ err:
     return MARGO_INSTANCE_NULL;
 }
 
+#ifdef MERCURY_PROFILING
 /* Initialize the Mercury Profiling Interface */
 static void margo_initialize_mercury_profiling_interface(hg_class_t *hg_class) {
 
@@ -610,12 +617,12 @@ static void margo_initialize_mercury_profiling_interface(hg_class_t *hg_class) {
        //fprintf(stderr, "[MARGO] PVAR at index 0 has name: %s, name_len: %d, pvar_class: %d, pvar_datatype: %d, desc: %s, desc_len: %d, pvar_bind: %d, continuous_flag: %d\n", name, name_len, pvar_class, pvar_datatype, desc, desc_len, pvar_bind, continuous);
        int num_pvars;
        num_pvars = HG_Prof_pvar_get_num(hg_class);
-       fprintf(stderr, "[MARGO] Num PVARs exported: %d\n", num_pvars);
-       /*HG_Prof_pvar_session_create(hg_class, &pvar_session);
+       fprintf(stderr, "[MARGO] Initializing profiling interface. Num PVARs exported: %d\n", num_pvars);
+       HG_Prof_pvar_session_create(hg_class, &pvar_session);
        pvar_handle = (hg_prof_pvar_handle_t*)malloc(num_pvars*sizeof(hg_prof_pvar_handle_t));
        pvar_count = (int*)malloc(num_pvars*sizeof(int));
        for(int i = 0 ; i < num_pvars; i++)
-         HG_Prof_pvar_handle_alloc(pvar_session, i, NULL, &(pvar_handle[i]), &(pvar_count[i]));*/
+         HG_Prof_pvar_handle_alloc(pvar_session, i, NULL, &(pvar_handle[i]), &(pvar_count[i]));
 }
 
 /* Finalize the Mercury Profiling Interface */
@@ -640,9 +647,8 @@ static void margo_finalize_mercury_profiling_interface(hg_class_t *hg_class) {
 /* As of now, there is only one PVAR that mercury exports. Read the value of that PVAR only. 
    This function should ultimately be capable of sampling any/all of the PVARs exported by Mercury */
 static void margo_read_pvar_data(margo_instance_id mid) {
-   void * buf;
-   //buf = (int*)malloc(sizeof(int)*1);
 
+   double buf;
    /*HG_Prof_pvar_read(pvar_session, pvar_handle[1], (void*)buf);
    __DIAG_UPDATE(mid->diag_input_serialization_elapsed, *(double *)buf);
    HG_Prof_pvar_read(pvar_session, pvar_handle[2], (void*)buf);
@@ -652,14 +658,11 @@ static void margo_read_pvar_data(margo_instance_id mid) {
    HG_Prof_pvar_read(pvar_session, pvar_handle[4], (void*)buf);
    __DIAG_UPDATE(mid->diag_output_serialization_elapsed, *(double *)buf);*/
 
-   /*for(int i = 0; i < 6; i++) {
-     HG_Prof_pvar_read(pvar_session, pvar_handle[i], (void*)buf);
-     fprintf(stderr, "[MARGO] PVAR at index %d now has a value: %f\n", i, *(double *)buf);
-   }*/
-   //HG_Prof_pvar_read(pvar_session, pvar_handle[0], (void*)buf);
-   //fprintf(stderr, "[MARGO] PVAR at index %d now has a value: %d\n", 0, *(int *)buf);
-   //free(buf);
+   for(int i = 0; i < 6; i++) {
+     HG_Prof_pvar_read(pvar_session, pvar_handle[i], (void*)&buf);
+   }
 }
+#endif
 
 margo_instance_id margo_init_pool(ABT_pool progress_pool, ABT_pool handler_pool,
     hg_context_t *hg_context)
@@ -875,17 +878,21 @@ void margo_finalize(margo_instance_id mid)
       ABT_thread_join(mid->system_stats_collection_tid);
       ABT_thread_free(&mid->system_stats_collection_tid);
 
-      //margo_read_pvar_data(mid);
+      #ifdef MERCURY_PROFILING
+      margo_read_pvar_data(mid);
+      margo_finalize_mercury_profiling_interface(mid->hg_class);
+      #endif
 
-      //margo_finalize_mercury_profiling_interface(mid->hg_class);
       margo_profile_dump(mid, "profile", 1);
       margo_system_stats_dump(mid, "profile", 1);
       margo_trace_dump(mid, "profile", 1);
     }
 
+    #ifdef APEX_PROFILING
     /* APEX Finalize */
     apex_finalize();
     apex_cleanup();
+    #endif
 
     if(mid->diag_enabled) 
       margo_diag_dump(mid, "profile", 1);
@@ -1450,8 +1457,10 @@ static hg_return_t margo_cb(const struct hg_cb_info *info)
 
           margo_internal_generate_trace_event(mid, req->trace_id, cr, req->current_rpc, (*temp) + 1);
    
+	  #ifdef MERCURY_PROFILING
           /* Read the exported PVAR data from the Mercury Profiling Interface */
-          //margo_read_pvar_data(mid);
+          margo_read_pvar_data(mid);
+          #endif
         }
     } else if(req->rpc_breadcrumb != 0 && req->is_server == 1) {
       uint64_t * temp;
@@ -1474,11 +1483,9 @@ static hg_return_t margo_wait_internal(margo_request req)
 {
     hg_return_t* waited_hret;
     hg_return_t  hret;
-    //apex_profiler_handle profiler = apex_start(APEX_FUNCTION_ADDRESS, &margo_wait_internal);
     ABT_eventual_wait(req->eventual, (void**)&waited_hret);
     hret = *waited_hret;
     ABT_eventual_free(&(req->eventual));
-    //apex_stop(profiler);
 
     return(hret);
 }
@@ -1536,7 +1543,9 @@ static hg_return_t margo_provider_iforward_internal(
 
     assert(provider_id <= MARGO_MAX_PROVIDER_ID);
 
+    #ifdef APEX_PROFILING
     apex_profiler_handle profiler = apex_start(APEX_FUNCTION_ADDRESS, &margo_provider_iforward_internal);
+    #endif
     hgi = HG_Get_info(handle);
     id = mux_id(hgi->id, provider_id);
 
@@ -1638,7 +1647,9 @@ static hg_return_t margo_provider_iforward_internal(
         HASH_JEN(addr_string, strlen(addr_string), req->server_addr_hash); /*record server address in the breadcrumb */
     }
 
+    #ifdef APEX_PROFILING
     apex_stop(profiler);
+    #endif
     return HG_Forward(handle, margo_cb, (void*)req, in_struct);
 }
 
@@ -1670,9 +1681,13 @@ hg_return_t margo_provider_forward_timed(
     hret = margo_provider_iforward_internal(provider_id, handle, timeout_ms, in_struct, &reqs);
     if(hret != HG_SUCCESS)
         return hret;
+    #ifdef APEX_PROFILING
     apex_profiler_handle profiler = apex_start(APEX_NAME_STRING, "WAIT_FOR_margo_provider_forward_timed");
+    #endif
     hret = margo_wait_internal(&reqs);
+    #ifdef APEX_PROFILING
     apex_stop(profiler);
+    #endif
     return hret;
 }
 
@@ -1809,7 +1824,9 @@ hg_return_t margo_respond(
     
       margo_breadcrumb_measure(mid, treq->rpc_breadcrumb, treq->start_time, 1, treq->provider_id, treq->server_addr_hash, handle, treq->abt_timer);
 
-      //margo_read_pvar_data(mid);
+      #ifdef MERCURY_PROFILING
+      margo_read_pvar_data(mid);
+      #endif
 
       ABT_key_get(request_order_key, (void**)(&order));
 
@@ -1823,15 +1840,21 @@ hg_return_t margo_respond(
 
     hg_return_t hret;
     struct margo_request_struct reqs;
+    #ifdef APEX_PROFILING
     apex_profiler_handle internal_profiler = apex_start(APEX_FUNCTION_ADDRESS, &margo_irespond_internal);
+    #endif
 
     hret = margo_irespond_internal(handle, out_struct, &reqs);
     if(hret != HG_SUCCESS)
         return hret;
+    #ifdef APEX_PROFILING
     apex_stop(internal_profiler);
     apex_profiler_handle profiler = apex_start(APEX_NAME_STRING, "WAIT_FOR_margo_irespond_internal");
+    #endif
     hret = margo_wait_internal(&reqs);
+    #ifdef APEX_PROFILING
     apex_stop(profiler);
+    #endif
     return hret;
 }
 
@@ -1865,7 +1888,9 @@ hg_return_t margo_bulk_create(
     hg_return_t hret;
     double tm1, tm2;
     int diag_enabled = mid->diag_enabled;
+    #ifdef APEX_PROFILING
     apex_profiler_handle profiler = apex_start(APEX_FUNCTION_ADDRESS, &margo_bulk_create);
+    #endif
 
     if(diag_enabled) tm1 = ABT_get_wtime();
     hret = HG_Bulk_create(mid->hg_class, count,
@@ -1876,7 +1901,9 @@ hg_return_t margo_bulk_create(
         __DIAG_UPDATE(mid->diag_bulk_create_elapsed, (tm2-tm1));
     }
 
+    #ifdef APEX_PROFILING
     apex_stop(profiler);
+    #endif
     return(hret);
 }
 
@@ -1938,17 +1965,23 @@ hg_return_t margo_bulk_transfer(
     size_t size)
 {  
 
+    #ifdef APEX_PROFILING
     apex_profiler_handle internal_profiler = apex_start(APEX_FUNCTION_ADDRESS, &margo_bulk_itransfer_internal);
+    #endif
     struct margo_request_struct reqs;
     hg_return_t hret = margo_bulk_itransfer_internal(mid,op,origin_addr,
                           origin_handle, origin_offset, local_handle,
                           local_offset, size, &reqs);
     if(hret != HG_SUCCESS)
         return hret;
+    #ifdef APEX_PROFILING
     apex_stop(internal_profiler);
     apex_profiler_handle profiler = apex_start(APEX_NAME_STRING, "WAIT_FOR_margo_bulk_transfer");
+    #endif
     hret = margo_wait_internal(&reqs);
+    #ifdef APEX_PROFILING
     apex_stop(profiler);
+    #endif
     return hret;
 }
 
@@ -1972,7 +2005,9 @@ hg_return_t margo_bulk_parallel_transfer(
     if(chunk_size == 0)
         return HG_INVALID_PARAM;
 
+    #ifdef APEX_PROFILING
     apex_profiler_handle profiler = apex_start(APEX_FUNCTION_ADDRESS, &margo_bulk_parallel_transfer);
+    #endif
 
     size_t count = size/chunk_size;
     if(count*chunk_size < size) count += 1;
@@ -2001,7 +2036,9 @@ wait:
     }
 finish:
     free(reqs);
+    #ifdef APEX_PROFILING
     apex_stop(profiler);
+    #endif
     return hret;
 }
 
@@ -2267,7 +2304,9 @@ static void hg_progress_fn(void* foo)
 
     while(!mid->hg_progress_shutdown_flag)
     {
+       #ifdef APEX_PROFILING
        apex_profiler_handle profiler = apex_start(APEX_FUNCTION_ADDRESS, &hg_progress_fn);
+       #endif
 
         do {
             /* save value of instance diag variable, in case it is modified
@@ -2296,9 +2335,13 @@ static void hg_progress_fn(void* foo)
          */
         ABT_pool_get_size(mid->progress_pool, &size);
         if(size) {
+            #ifdef APEX_PROFILING
             apex_yield(profiler);
+            #endif
             ABT_thread_yield();
+            #ifdef APEX_PROFILING
             profiler = apex_start(APEX_FUNCTION_ADDRESS, &hg_progress_fn);
+            #endif
         }
         /* Are there any other threads in this pool that *might* need to 
          * execute at some point in the future?  If so, then it's not
@@ -2351,9 +2394,13 @@ static void hg_progress_fn(void* foo)
             else if(ret == HG_TIMEOUT)
             {
                 /* No completion; yield here to allow other ULTs to run */
+                #ifdef APEX_PROFILING
                 apex_yield(profiler);
+                #endif
                 ABT_thread_yield();
+                #ifdef APEX_PROFILING
                 profiler = apex_start(APEX_FUNCTION_ADDRESS, &hg_progress_fn);
+                #endif
             }
             else
             {
@@ -2402,7 +2449,9 @@ static void hg_progress_fn(void* foo)
 
         /* check for any expired timers */
         margo_check_timers(mid);
+        #ifdef APEX_PROFILING
         apex_stop(profiler);
+        #endif
     }
 
     return;
