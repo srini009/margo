@@ -212,6 +212,8 @@ struct margo_request_struct {
     uint16_t provider_id; /* id of the provider servicing the request, local to the margo server instance */
     uint64_t trace_id;
     uint64_t is_server;
+    double handler_time;
+    double ult_time;
     ABT_timer abt_timer;
 };
 
@@ -229,37 +231,9 @@ static void system_stats_collection_fn(void* foo);
 
 static void margo_rpc_data_free(void* ptr);
 static uint64_t margo_breadcrumb_set(hg_id_t rpc_id);
-static void margo_breadcrumb_measure(margo_instance_id mid, uint64_t rpc_breadcrumb, double start, breadcrumb_type type, uint16_t provider_id, uint64_t hash, hg_handle_t h, ABT_timer _timer);
+static void margo_breadcrumb_measure(margo_instance_id mid, uint64_t rpc_breadcrumb, double start, breadcrumb_type type, uint16_t provider_id, uint64_t hash, hg_handle_t h);
 static void remote_shutdown_ult(hg_handle_t handle);
 DECLARE_MARGO_RPC_HANDLER(remote_shutdown_ult);
-
-void _wrapper_for_remote_shutdown_ult__name(custom_handle *c) { 
-    margo_instance_id __mid; 
-    hg_handle_t handle = c->handle;
-    __mid = margo_hg_handle_get_instance(handle); 
-    __margo_internal_pre_wrapper_hooks(__mid, handle, c->ts); 
-    remote_shutdown_ult(handle); 
-    __margo_internal_post_wrapper_hooks(__mid);
-}
-
-hg_return_t _handler_for_remote_shutdown_ult(hg_handle_t handle) { 
-    int __ret; 
-    ABT_pool __pool; 
-    margo_instance_id __mid; 
-    __mid = margo_hg_handle_get_instance(handle); 
-    if(__mid == MARGO_INSTANCE_NULL) { return(HG_OTHER_ERROR); } 
-    custom_handle *c = (custom_handle*)malloc(sizeof(custom_handle));
-    c->handle = handle;
-    c->ts = ABT_get_wtime();
-    if(__margo_internal_finalize_requested(__mid)) { return(HG_CANCELED); } 
-    __pool = margo_hg_handle_get_handler_pool(handle); 
-    __margo_internal_incr_pending(__mid); 
-    __ret = ABT_thread_create(__pool, (void (*)(void *))_wrapper_for_remote_shutdown_ult__name, (void*)c, ABT_THREAD_ATTR_NULL, NULL); 
-    if(__ret != 0) { 
-        return(HG_NOMEM_ERROR); 
-    } 
-    return(HG_SUCCESS);
-}
 
 static inline void demux_id(hg_id_t in, hg_id_t* base_id, uint16_t *provider_id)
 {
@@ -1448,7 +1422,7 @@ static hg_return_t margo_cb(const struct hg_cb_info *info)
 
         if(mid->profile_enabled) {
           /* 0 here indicates this is a origin-side call */
-          margo_breadcrumb_measure(mid, req->rpc_breadcrumb, req->start_time, 0, req->provider_id, req->server_addr_hash, req->handle, NULL);
+          margo_breadcrumb_measure(mid, req->rpc_breadcrumb, req->start_time, 0, req->provider_id, req->server_addr_hash, req->handle);
           int ret = HG_Get_output_buf(req->handle, (void**)&temp, NULL);
           if(ret != HG_SUCCESS)
             return(ret);
@@ -1461,14 +1435,15 @@ static hg_return_t margo_cb(const struct hg_cb_info *info)
           #endif
         }
     } else if(req->rpc_breadcrumb != 0 && req->is_server == 1) {
-      uint64_t * temp;
-      mid = margo_hg_handle_get_instance(req->handle);
-      assert(mid);
+        /* This is the callback from an HG_Respond call.  Track RPC timing
+         * information.*/
+          uint64_t * temp;
+          mid = margo_hg_handle_get_instance(req->handle);
+          assert(mid);
 
-      /* the "1" indicates that this a target-side breadcrumb */
-      margo_breadcrumb_measure(mid, req->rpc_breadcrumb, req->start_time, 1, req->provider_id, req->server_addr_hash, req->handle, req->abt_timer);
+          /* the "1" indicates that this a target-side breadcrumb */
+          margo_breadcrumb_measure(mid, req->rpc_breadcrumb, req->start_time, 1, req->provider_id, req->server_addr_hash, req->handle);
 
-      margo_internal_generate_trace_event(mid, req->trace_id, ss, req->current_rpc, 3);
     }
 
     /* propagate return code out through eventual */
@@ -1765,10 +1740,10 @@ static hg_return_t margo_irespond_internal(
     {
         return(HG_NOMEM_ERROR);
     }
+
     req->handle = handle;
     req->timer = NULL;
     req->start_time = ABT_get_wtime();
-    //req->rpc_breadcrumb = 0;
     req->is_server = 1;
     request_metadata * metadata;
     const struct hg_info* info;
@@ -1797,10 +1772,7 @@ static hg_return_t margo_irespond_internal(
          * RPCs, there will be a stack showing the ancestry of RPC calls that
          * led to that point.
          */
-        margo_internal_generate_trace_event(mid, (*metadata).trace_id, sr, (*metadata).current_rpc, (*metadata).order + 1);
-        margo_internal_request_order_set((*metadata).order + 1);
         margo_internal_breadcrumb_handler_set((*metadata).rpc_breadcrumb << 16);
-        margo_internal_trace_id_set((*metadata).trace_id);
     }
 
     return HG_Respond(handle, margo_cb, (void*)req, out_struct);
@@ -1816,17 +1788,18 @@ hg_return_t margo_respond(
     uint64_t * order;
     uint64_t * temp;
     margo_instance_id mid = margo_hg_handle_get_instance(handle);
-    /*if(mid->profile_enabled) {
+    double handler_time = 0, ult_time = 0;
+    if(mid->profile_enabled) {
       ABT_key_get(target_timing_key, (void**)(&treq));
       assert(treq != NULL);
     
-      margo_breadcrumb_measure(mid, treq->rpc_breadcrumb, treq->start_time, 1, treq->provider_id, treq->server_addr_hash, handle, treq->abt_timer);
-
       #ifdef MERCURY_PROFILING
       margo_read_pvar_data(mid);
       #endif
 
       ABT_key_get(request_order_key, (void**)(&order));
+      handler_time = treq->handler_time;
+      ult_time = ABT_get_wtime() - treq->start_time;
 
       int ret = HG_Get_output_buf(handle, (void**)&temp, NULL);
       if(ret != HG_SUCCESS)
@@ -1834,7 +1807,7 @@ hg_return_t margo_respond(
 
       (*temp) = (*order) + 1;
       margo_internal_generate_trace_event(mid, treq->trace_id, ss, treq->current_rpc, (*order) + 1);
-    }*/
+    }
 
     hg_return_t hret;
     struct margo_request_struct reqs;
@@ -1842,6 +1815,8 @@ hg_return_t margo_respond(
     apex_profiler_handle internal_profiler = apex_start(APEX_FUNCTION_ADDRESS, &margo_irespond_internal);
     #endif
 
+    reqs.handler_time = handler_time;
+    reqs.ult_time = ult_time;
     hret = margo_irespond_internal(handle, out_struct, &reqs);
     if(hret != HG_SUCCESS)
         return hret;
@@ -2500,7 +2475,6 @@ static void print_profile_data(margo_instance_id mid, FILE *file, const char* na
     else
         avg = 0;
 
-    fprintf(stderr, "Printing out data \n");
     /* first line is breadcrumb data */
     fprintf(file, "%s,%.9f,%lu,%lu,%d,%.9f,%.9f,%.9f,%lu,%lu,%lu,%lu,%lu,%lu,%lu\n", name, avg, data->key.rpc_breadcrumb, data->key.addr_hash, data->type, data->stats.cumulative, data->stats.min, data->stats.max, data->stats.count, data->stats.abt_pool_size_hwm, data->stats.abt_pool_size_lwm, data->stats.abt_pool_size_cumulative, data->stats.abt_pool_total_size_hwm, data->stats.abt_pool_total_size_lwm, data->stats.abt_pool_total_size_cumulative);
 
@@ -3016,7 +2990,7 @@ static void remote_shutdown_ult(hg_handle_t handle)
     }
 }
 
-//DEFINE_MARGO_RPC_HANDLER(remote_shutdown_ult)
+DEFINE_MARGO_RPC_HANDLER(remote_shutdown_ult)
 
 static hg_id_t margo_register_internal(margo_instance_id mid, hg_id_t id,
     hg_proc_cb_t in_proc_cb, hg_proc_cb_t out_proc_cb, hg_rpc_cb_t rpc_cb,
@@ -3115,7 +3089,7 @@ static uint64_t margo_breadcrumb_set(hg_id_t rpc_id)
 
 /* records statistics for a breadcrumb, to be used after completion of an
  * RPC, both on the origin as well as on the target */
-static void margo_breadcrumb_measure(margo_instance_id mid, uint64_t rpc_breadcrumb, double start, breadcrumb_type type, uint16_t provider_id, uint64_t hash, hg_handle_t h, ABT_timer _timer)
+static void margo_breadcrumb_measure(margo_instance_id mid, uint64_t rpc_breadcrumb, double start, breadcrumb_type type, uint16_t provider_id, uint64_t hash, hg_handle_t h)
 {
     struct diag_data *stat;
     double end, elapsed;
@@ -3143,12 +3117,6 @@ static void margo_breadcrumb_measure(margo_instance_id mid, uint64_t rpc_breadcr
 
     end = ABT_get_wtime();
     elapsed = end-start;
-
-    /*if(t == 1) {
-     double previous;
-     ABT_timer_stop_and_read(_timer, &previous);
-     elapsed += previous;
-    }*/
 
     ABT_mutex_lock(mid->diag_rpc_mutex);
 
@@ -3281,12 +3249,9 @@ void __margo_internal_start_server_time(margo_instance_id mid, hg_handle_t handl
         req->handle = handle;
         req->current_rpc = (*metadata).current_rpc;
         req->trace_id = (*metadata).trace_id;
-        if(ts > 0) {
-          req->start_time = ts;
-        } else {
-          req->start_time = ABT_get_wtime();
-        }
-        req->is_server = 1;
+        req->start_time = ABT_get_wtime();
+        req->handler_time = (req->start_time - ts);
+        req->is_server = 0;
         info = HG_Get_info(handle);
         req->provider_id = 0;
         req->provider_id += ((info->id) & (((1<<(__MARGO_PROVIDER_ID_SIZE*8))-1)));
