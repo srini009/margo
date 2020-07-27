@@ -231,7 +231,7 @@ static void system_stats_collection_fn(void* foo);
 
 static void margo_rpc_data_free(void* ptr);
 static uint64_t margo_breadcrumb_set(hg_id_t rpc_id);
-static void margo_breadcrumb_measure(margo_instance_id mid, uint64_t rpc_breadcrumb, double start, breadcrumb_type type, uint16_t provider_id, uint64_t hash, hg_handle_t h);
+static void margo_breadcrumb_measure(margo_instance_id mid, margo_request req, breadcrumb_type type);
 static void remote_shutdown_ult(hg_handle_t handle);
 DECLARE_MARGO_RPC_HANDLER(remote_shutdown_ult);
 
@@ -1422,7 +1422,7 @@ static hg_return_t margo_cb(const struct hg_cb_info *info)
 
         if(mid->profile_enabled) {
           /* 0 here indicates this is a origin-side call */
-          margo_breadcrumb_measure(mid, req->rpc_breadcrumb, req->start_time, 0, req->provider_id, req->server_addr_hash, req->handle);
+          margo_breadcrumb_measure(mid, req, 0);
           int ret = HG_Get_output_buf(req->handle, (void**)&temp, NULL);
           if(ret != HG_SUCCESS)
             return(ret);
@@ -1442,7 +1442,7 @@ static hg_return_t margo_cb(const struct hg_cb_info *info)
           assert(mid);
 
           /* the "1" indicates that this a target-side breadcrumb */
-          margo_breadcrumb_measure(mid, req->rpc_breadcrumb, req->start_time, 1, req->provider_id, req->server_addr_hash, req->handle);
+          margo_breadcrumb_measure(mid, req, 1);
 
     }
 
@@ -2476,7 +2476,7 @@ static void print_profile_data(margo_instance_id mid, FILE *file, const char* na
         avg = 0;
 
     /* first line is breadcrumb data */
-    fprintf(file, "%s,%.9f,%lu,%lu,%d,%.9f,%.9f,%.9f,%lu,%lu,%lu,%lu,%lu,%lu,%lu\n", name, avg, data->key.rpc_breadcrumb, data->key.addr_hash, data->type, data->stats.cumulative, data->stats.min, data->stats.max, data->stats.count, data->stats.abt_pool_size_hwm, data->stats.abt_pool_size_lwm, data->stats.abt_pool_size_cumulative, data->stats.abt_pool_total_size_hwm, data->stats.abt_pool_total_size_lwm, data->stats.abt_pool_total_size_cumulative);
+    fprintf(file, "%s,%.9f,%lu,%lu,%d,%.9f,%.9f,%.9f,%.9f,%.9f,%lu,%lu,%lu,%lu,%lu,%lu,%lu\n", name, avg, data->key.rpc_breadcrumb, data->key.addr_hash, data->type, data->stats.cumulative, data->stats.handler_time, data->stats.completion_callback_time, data->stats.min, data->stats.max, data->stats.count, data->stats.abt_pool_size_hwm, data->stats.abt_pool_size_lwm, data->stats.abt_pool_size_cumulative, data->stats.abt_pool_total_size_hwm, data->stats.abt_pool_total_size_lwm, data->stats.abt_pool_total_size_cumulative);
 
     /* second line is sparkline data for the given breadcrumb*/
     fprintf(file, "%s,%d;", name, data->type);
@@ -3089,8 +3089,13 @@ static uint64_t margo_breadcrumb_set(hg_id_t rpc_id)
 
 /* records statistics for a breadcrumb, to be used after completion of an
  * RPC, both on the origin as well as on the target */
-static void margo_breadcrumb_measure(margo_instance_id mid, uint64_t rpc_breadcrumb, double start, breadcrumb_type type, uint16_t provider_id, uint64_t hash, hg_handle_t h)
+static void margo_breadcrumb_measure(margo_instance_id mid, margo_request req, breadcrumb_type type)
 {
+    uint64_t rpc_breadcrumb = req->rpc_breadcrumb;
+    double start = req->start_time;
+    uint16_t provider_id = req->provider_id;
+    uint64_t hash = req->server_addr_hash;
+    hg_handle_t h = req->handle;
     struct diag_data *stat;
     double end, elapsed;
     uint16_t t = (type == origin) ? 2: 1;
@@ -3189,7 +3194,17 @@ static void margo_breadcrumb_measure(margo_instance_id mid, uint64_t rpc_breadcr
     /* Argobots pool info */
 
     stat->stats.count++;
-    stat->stats.cumulative += elapsed;
+    if(type) {
+      stat->stats.cumulative += req->ult_time;
+      stat->stats.handler_time += req->handler_time;
+      stat->stats.completion_callback_time += elapsed;
+      elapsed += req->ult_time + req->handler_time;
+    } else {
+      stat->stats.cumulative += elapsed;
+      stat->stats.handler_time = 0;
+      stat->stats.completion_callback_time = 0;
+    }
+
     if(elapsed > stat->stats.max)
         stat->stats.max = elapsed;
     if(stat->stats.min == 0 || elapsed < stat->stats.min)

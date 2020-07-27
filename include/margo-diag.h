@@ -67,6 +67,10 @@ struct breadcrumb_stats
     double max;
     double cumulative;
 
+    /* additional stats */
+    double handler_time;
+    double completion_callback_time;
+
     /* stats for RPC handler pool sizes */
     /* Total pool size = Total number of runnable items + items waiting on a lock */
     unsigned long abt_pool_total_size_lwm; /* low watermark */
