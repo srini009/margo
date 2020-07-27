@@ -223,8 +223,6 @@ struct margo_rpc_data
 	void (*user_free_callback)(void *);
 };
 
-//MERCURY_GEN_PROC(margo_shutdown_out_t, ((int32_t)(ret)));
-
 static void hg_progress_fn(void* foo);
 static void sparkline_data_collection_fn(void* foo);
 static void system_stats_collection_fn(void* foo);
@@ -414,7 +412,6 @@ margo_instance_id margo_init_opt(const char *addr_str, int mode, const struct hg
     int my_rank, total_ranks;
     FILE *fp = fopen(mypid, "r");
     fscanf(fp, "%d %d", &my_rank, &total_ranks);
-    fprintf(stderr, "Listen flag %d and got rank and total rank: %d %d\n", listen_flag, my_rank, total_ranks);
     
     apex_init("apex_margo", my_rank, total_ranks);
     apex_set_untied_timers(1);
@@ -658,7 +655,8 @@ static void margo_read_pvar_data(margo_instance_id mid) {
    HG_Prof_pvar_read(pvar_session, pvar_handle[4], (void*)buf);
    __DIAG_UPDATE(mid->diag_output_serialization_elapsed, *(double *)buf);*/
 
-   for(int i = 0; i < 6; i++) {
+   int num_pvars = HG_Prof_pvar_get_num(hg_class);
+   for(int i = 0; i < num_pvars; i++) {
      HG_Prof_pvar_read(pvar_session, pvar_handle[i], (void*)&buf);
    }
 }
@@ -3316,10 +3314,7 @@ void __margo_internal_pre_wrapper_hooks(margo_instance_id mid, hg_handle_t handl
     char * name;
     struct margo_request_struct* req;
 
-    ret = HG_Get_input_buf(handle, (void**)&metadata, NULL);
-    assert(ret == HG_SUCCESS);
-    (*metadata).rpc_breadcrumb = le64toh((*metadata).rpc_breadcrumb);
-    //__margo_internal_start_server_time(mid, handle, ts);
+    __margo_internal_start_server_time(mid, handle, ts);
 }
   
 
