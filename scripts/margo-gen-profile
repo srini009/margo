@@ -21,6 +21,8 @@ class ProfileGenerator:
 		self.name = "MargoProfileGenerator"
 
 		self.cumulative = [dict(), dict()] #Separate dictionaries for origin and target in the form <KEY = RPC breadcrumb name, VALUE = cumulative time>
+		self.handler_time = [dict(), dict()] #Separate dictionaries for origin and target in the form <KEY = RPC breadcrumb name, VALUE = handler time>
+		self.completion_callback_time = [dict(), dict()] #Separate dictionaries for origin and target in the form <KEY = RPC breadcrumb name, VALUE = completion callback time>
 		self.count = dict() #Dictionary in the form <KEY = RPC breadcrumb name, VALUE = cumulative count>
 
 		self.cumulativestat = [defaultdict(list), defaultdict(list)]  #Separate dictionaries for origin and target in the form <KEY = RPC breadcrumb name, VALUE = [list of individual times] >
@@ -64,7 +66,7 @@ class ProfileGenerator:
 	# perf_arr = performance numbers to plot
 	# is_stat_graph = whether this graph is a statistics graph or not
 	# objects = list of stuff to plot on the x-axis
-	def __gengraph(self, x_pos, perf_arr, xlabel, ylabel, title, txt=None, is_stat_graph=False, use_x_ticks=False, objects=None, labels=[None, None]):
+	def __gengraph(self, x_pos, perf_arr, xlabel, ylabel, title, txt=None, is_stat_graph=False, use_x_ticks=False, objects=None, labels=[None, None], is_stacked=False):
 		fig = plt.figure(num=None, figsize=(15, 10), dpi=80, facecolor='w', edgecolor='k')
 		ax = fig.add_subplot(111)
 		width=0.35
@@ -74,7 +76,22 @@ class ProfileGenerator:
 			ax.set_ylim(bottom=0)
 		else:
 			for i in range(0, len(perf_arr)):
-				ax.bar(x_pos+i*width, perf_arr[i], width=width, align='center', alpha=0.5, label=labels[i])
+				if not is_stacked:
+					ax.bar(x_pos+i*width, perf_arr[i], width=width, align='center', alpha=0.5, label=labels[i])
+				else:
+					ax.set_ylim(bottom=0, top=perf_arr[0][0][0]*1.1)
+					bottombar = [j[0] for j in perf_arr[i]]
+					middlebar = [j[1] for j in perf_arr[i]]
+					topbar = [j[2] for j in perf_arr[i]]
+					if i == 0:
+						ax.bar(x_pos+i*width, bottombar, width=width, align='center', alpha=0.5, label=labels[i])
+						ax.bar(x_pos+i*width, middlebar, width=width, align='center', alpha=0.5, bottom=bottombar)
+						ax.bar(x_pos+i*width, topbar, width=width, align='center', alpha=0.5, bottom=[middlebar[j] + bottombar[j] for j, e in enumerate(middlebar)])
+					else:
+						ax.bar(x_pos+i*width, bottombar, width=width, align='center', alpha=0.5, label=labels[i][0])
+						ax.bar(x_pos+i*width, middlebar, width=width, align='center', alpha=0.5, label=labels[i][1], bottom=bottombar)
+						ax.bar(x_pos+i*width, topbar, width=width, align='center', alpha=0.5, label=labels[i][2], bottom=[middlebar[j] + bottombar[j] for j, e in enumerate(middlebar)])
+
 				ax.legend(loc='best')
 			
 		if(use_x_ticks):
@@ -234,14 +251,16 @@ class ProfileGenerator:
 				#Even lines contain breadcrumb data
 				name, avg, rpc_breadcrumb, \
 					addr_hash, origin_or_target, \
-						cumulative, _min, _max, count, \
+						cumulative, handler_time, completion_callback_time, _min, _max, count, \
 							abt_pool_size_hwm, abt_pool_size_lwm, abt_pool_size_cumulative,  \
-								abt_pool_total_size_hwm, abt_pool_total_size_lwm, abt_pool_total_size_cumulative = breadcrumb_line.split(',', 15)
+								abt_pool_total_size_hwm, abt_pool_total_size_lwm, abt_pool_total_size_cumulative = breadcrumb_line.split(',', 17)
 				origin_or_target = int(origin_or_target)
 				addr_hash = int(addr_hash)
 
 				self.count[name] = self.count.get(name, 0) + int(count)
 				self.cumulative[origin_or_target][name] = self.cumulative[origin_or_target].get(name, 0.0) + float(cumulative)
+				self.handler_time[origin_or_target][name] = self.handler_time[origin_or_target].get(name, 0.0) + float(handler_time)
+				self.completion_callback_time[origin_or_target][name] = self.completion_callback_time[origin_or_target].get(name, 0.0) + float(completion_callback_time)
 				self.countstat[origin_or_target][name].append(int(count))
 				self.cumulativestat[origin_or_target][name].append(float(cumulative))
 
@@ -326,7 +345,7 @@ class ProfileGenerator:
 	# 0 = origin, 1 = target
 	def gencumulativegraph(self):
 		graph_name = 'Cumulative Time'
-		labels = ['Origin', 'Target']
+		labels = ['Origin', ['Target ULT Execution Time', 'Target ULT Handler Time', 'Target Callback Completion Time']]
 		perf_arr = []
 		txt = 'Sort breadcrumbs by cumulative time on the origin \n Display top-5 breadcrumbs in descending order of cumulative time on origin and target'
 
@@ -338,12 +357,11 @@ class ProfileGenerator:
 		for i in 0,1:
 			perf = []
 			for k in keys:
-				perf.append(self.cumulative[i][k])
-
+				perf.append((self.cumulative[i][k], self.handler_time[i][k], self.completion_callback_time[i][k]))
 			perf_arr.append(perf)
 
 		self.__gengraph(x_pos, perf_arr, 'Breadcrumb ID', 'Seconds',
-		graph_name, txt=txt, is_stat_graph=False, use_x_ticks=True, objects=objects, labels=labels)
+		graph_name, txt=txt, is_stat_graph=False, use_x_ticks=True, objects=objects, labels=labels, is_stacked=True)
 
 	#Display statistics on origin and target for the top 5 RPC breadcrumbs determined by cumulative time
 	# 0 = origin, 1 = target
