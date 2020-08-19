@@ -28,7 +28,7 @@
 #define DEFAULT_MERCURY_PROGRESS_TIMEOUT_UB 100 /* 100 milliseconds */
 #define DEFAULT_MERCURY_HANDLE_CACHE_SIZE 32
 
-#define MARGO_SPARKLINE_TIMESLICE 1
+#define MARGO_SPARKLINE_TIMESLICE 10
 #define MARGO_SYSTEM_STATS_COLLECTION_TIMESLICE 0.5
 
 /* If margo is initializing ABT, we need to track how many instances of margo
@@ -72,8 +72,8 @@ struct diag_data
     __uint128_t x;
 
     /*sparkline data for breadcrumb */
-    double sparkline_time[100];
-    double sparkline_count[100];
+    double sparkline_time[100000];
+    double sparkline_count[100000];
 
     UT_hash_handle hh;        /* hash table link */
 };
@@ -504,7 +504,7 @@ margo_instance_id margo_init_opt(const char *addr_str, int mode, const struct hg
        uint64_t hash;
 
        margo_profile_start(mid);
-       ABTX_prof_start(g_prof_context, ABTX_PROF_MODE_BASIC);
+       ABTX_prof_start(g_prof_context, ABTX_PROF_MODE_DETAILED);
 
        GET_SELF_ADDR_STR(mid, name);
        HASH_JEN(name, strlen(name), hash); /*record own address in the breadcrumb */
@@ -2189,7 +2189,7 @@ static void sparkline_data_collection_fn(void* foo)
 
     while(!mid->hg_progress_shutdown_flag)
     {
-        margo_thread_sleep(mid, MARGO_SPARKLINE_TIMESLICE*1000);
+        margo_thread_sleep(mid, MARGO_SPARKLINE_TIMESLICE);
         HASH_ITER(hh, mid->diag_rpc, stat, tmp)
         {
 
@@ -2492,8 +2492,8 @@ static void print_profile_data(margo_instance_id mid, FILE *file, const char* na
 
     /* second line is sparkline data for the given breadcrumb*/
     fprintf(file, "%s,%d;", name, data->type);
-    //for(i = 0; i < mid->sparkline_index; i++)
-    //  fprintf(file, "%.9f,%.9f, %d;", data->sparkline_time[i], data->sparkline_count[i], i);
+    for(i = 0; i < mid->sparkline_index; i++)
+      fprintf(file, "%.9f,%.9f, %d;", data->sparkline_time[i], data->sparkline_count[i], i);
     fprintf(file,"\n");
 
     return;
