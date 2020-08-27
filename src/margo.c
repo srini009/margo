@@ -28,7 +28,7 @@
 #define DEFAULT_MERCURY_PROGRESS_TIMEOUT_UB 100 /* 100 milliseconds */
 #define DEFAULT_MERCURY_HANDLE_CACHE_SIZE 32
 
-#define MARGO_SPARKLINE_TIMESLICE 10
+#define MARGO_SPARKLINE_TIMESLICE 1000
 #define MARGO_SYSTEM_STATS_COLLECTION_TIMESLICE 0.5
 
 /* If margo is initializing ABT, we need to track how many instances of margo
@@ -49,7 +49,7 @@ static hg_prof_pvar_handle_t *pvar_handle;
 static int *pvar_count;
 static void margo_initialize_mercury_profiling_interface(hg_class_t *hg_class);
 static void margo_finalize_mercury_profiling_interface(hg_class_t *hg_class);
-static void margo_read_pvar_data(margo_instance_id mid);
+static void margo_read_pvar_data(margo_instance_id mid, hg_handle_t handle);
 #endif
 
 ABTX_prof_context g_prof_context;
@@ -527,7 +527,7 @@ margo_instance_id margo_init_opt(const char *addr_str, int mode, const struct hg
        mid->trace_collection_start_time = ABT_get_wtime();
 
        /* Initialize the Mercury Profiling Interface */
-       //margo_initialize_mercury_profiling_interface(hg_class);
+       margo_initialize_mercury_profiling_interface(hg_class);
 
     }
 
@@ -592,7 +592,7 @@ static void margo_initialize_mercury_profiling_interface(hg_class_t *hg_class) {
        hg_prof_bind_t pvar_bind;
        HG_Prof_init(hg_class);
        //HG_Prof_pvar_get_info(hg_class, 0, name, &name_len, &pvar_class, &pvar_datatype, desc, &desc_len, &pvar_bind, &continuous);
-       //fprintf(stderr, "[MARGO] PVAR at index 0 has name: %s, name_len: %d, pvar_class: %d, pvar_datatype: %d, desc: %s, desc_len: %d, pvar_bind: %d, continuous_flag: %d\n", name, name_len, pvar_class, pvar_datatype, desc, desc_len, pvar_bind, continuous);
+       fprintf(stderr, "[MARGO] PVAR at index 0 has name: %s, name_len: %d, pvar_class: %d, pvar_datatype: %d, desc: %s, desc_len: %d, pvar_bind: %d, continuous_flag: %d\n", name, name_len, pvar_class, pvar_datatype, desc, desc_len, pvar_bind, continuous);
        int num_pvars;
        num_pvars = HG_Prof_pvar_get_num(hg_class);
        fprintf(stderr, "[MARGO] Initializing profiling interface. Num PVARs exported: %d\n", num_pvars);
@@ -624,9 +624,10 @@ static void margo_finalize_mercury_profiling_interface(hg_class_t *hg_class) {
 
 /* As of now, there is only one PVAR that mercury exports. Read the value of that PVAR only. 
    This function should ultimately be capable of sampling any/all of the PVARs exported by Mercury */
-static void margo_read_pvar_data(margo_instance_id mid) {
+static void margo_read_pvar_data(margo_instance_id mid, hg_handle_t handle) {
 
-   double buf;
+   int * buf;
+   buf = (int *)malloc(sizeof(int));
    /*HG_Prof_pvar_read(pvar_session, pvar_handle[1], (void*)buf);
    __DIAG_UPDATE(mid->diag_input_serialization_elapsed, *(double *)buf);
    HG_Prof_pvar_read(pvar_session, pvar_handle[2], (void*)buf);
@@ -636,10 +637,13 @@ static void margo_read_pvar_data(margo_instance_id mid) {
    HG_Prof_pvar_read(pvar_session, pvar_handle[4], (void*)buf);
    __DIAG_UPDATE(mid->diag_output_serialization_elapsed, *(double *)buf);*/
 
-   int num_pvars = HG_Prof_pvar_get_num(hg_class);
-   for(int i = 0; i < num_pvars; i++) {
+   //int num_pvars = HG_Prof_pvar_get_num(hg_class);
+   /*for(int i = 0; i < num_pvars; i++) {
      HG_Prof_pvar_read(pvar_session, pvar_handle[i], (void*)&buf);
-   }
+   }*/
+
+   HG_Prof_pvar_read(pvar_session, pvar_handle[6], handle, (void*)buf);
+   fprintf(stderr, "PVAR value is %d\n", *buf);
 }
 #endif
 
@@ -858,7 +862,7 @@ void margo_finalize(margo_instance_id mid)
       ABT_thread_free(&mid->system_stats_collection_tid);
 
       #ifdef MERCURY_PROFILING
-      margo_read_pvar_data(mid);
+      //margo_read_pvar_data(mid);
       margo_finalize_mercury_profiling_interface(mid->hg_class);
       #endif
 
@@ -1443,7 +1447,7 @@ static hg_return_t margo_cb(const struct hg_cb_info *info)
    
 	  #ifdef MERCURY_PROFILING
           /* Read the exported PVAR data from the Mercury Profiling Interface */
-          margo_read_pvar_data(mid);
+          //margo_read_pvar_data(mid);
           #endif
         }
     } else if(req->rpc_breadcrumb != 0 && req->is_server == 1) {
@@ -1806,7 +1810,7 @@ hg_return_t margo_respond(
       assert(treq != NULL);
     
       #ifdef MERCURY_PROFILING
-      margo_read_pvar_data(mid);
+      margo_read_pvar_data(mid, handle);
       #endif
 
       ABT_key_get(request_order_key, (void**)(&order));
@@ -2193,12 +2197,12 @@ static void sparkline_data_collection_fn(void* foo)
         HASH_ITER(hh, mid->diag_rpc, stat, tmp)
         {
 
-          if(mid->sparkline_index > 0 && mid->sparkline_index < 100) {
+          if(mid->sparkline_index > 0 && mid->sparkline_index < 100000) {
             stat->sparkline_time[mid->sparkline_index] = stat->stats.cumulative - stat->sparkline_time[mid->sparkline_index - 1];
-            stat->sparkline_count[mid->sparkline_index] = stat->stats.count - stat->sparkline_count[mid->sparkline_index - 1];
+            stat->sparkline_count[mid->sparkline_index] = (stat->stats.count - stat->sparkline_count[mid->sparkline_index - 1])/MARGO_SPARKLINE_TIMESLICE;
           } else if(mid->sparkline_index == 0) {
             stat->sparkline_time[mid->sparkline_index] = stat->stats.cumulative;
-            stat->sparkline_count[mid->sparkline_index] = stat->stats.count;
+            stat->sparkline_count[mid->sparkline_index] = (stat->stats.count)/MARGO_SPARKLINE_TIMESLICE;
           } else {
             //Drop!
           }
@@ -3170,8 +3174,8 @@ static void margo_breadcrumb_measure(margo_instance_id mid, margo_request req, b
         stat->stats.abt_pool_total_size_hwm = -1;
    
         /* initialize sparkline data */
-        memset(stat->sparkline_time, 0.0, 100*sizeof(double));
-        memset(stat->sparkline_count, 0.0, 100*sizeof(double));
+        memset(stat->sparkline_time, 0.0, 100000*sizeof(double));
+        memset(stat->sparkline_count, 0.0, 100000*sizeof(double));
  
         HASH_ADD(hh, mid->diag_rpc, x,
             sizeof(x), stat);
