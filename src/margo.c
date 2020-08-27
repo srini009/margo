@@ -527,7 +527,9 @@ margo_instance_id margo_init_opt(const char *addr_str, int mode, const struct hg
        mid->trace_collection_start_time = ABT_get_wtime();
 
        /* Initialize the Mercury Profiling Interface */
+       #ifdef MERCURY_PROFILING
        margo_initialize_mercury_profiling_interface(hg_class);
+       #endif
 
     }
 
