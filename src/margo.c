@@ -629,7 +629,7 @@ static void margo_finalize_mercury_profiling_interface(hg_class_t *hg_class) {
 static void margo_read_pvar_data(margo_instance_id mid, hg_handle_t handle) {
 
    int * buf;
-   buf = (int *)malloc(sizeof(int));
+   buf = (int *)malloc(4*sizeof(int));
    /*HG_Prof_pvar_read(pvar_session, pvar_handle[1], (void*)buf);
    __DIAG_UPDATE(mid->diag_input_serialization_elapsed, *(double *)buf);
    HG_Prof_pvar_read(pvar_session, pvar_handle[2], (void*)buf);
@@ -644,8 +644,11 @@ static void margo_read_pvar_data(margo_instance_id mid, hg_handle_t handle) {
      HG_Prof_pvar_read(pvar_session, pvar_handle[i], (void*)&buf);
    }*/
 
-   HG_Prof_pvar_read(pvar_session, pvar_handle[6], handle, (void*)buf);
-   fprintf(stderr, "PVAR value is %d\n", *buf);
+   HG_Prof_pvar_read(pvar_session, pvar_handle[0], handle, (void*)&buf[0]);
+   HG_Prof_pvar_read(pvar_session, pvar_handle[1], handle, (void*)&buf[1]);
+   HG_Prof_pvar_read(pvar_session, pvar_handle[2], handle, (void*)&buf[2]);
+   HG_Prof_pvar_read(pvar_session, pvar_handle[3], handle, (void*)&buf[3]);
+   fprintf(stderr, "Num. posted handles: %d, Backfill queue count: %d, Completion queue count: %d, Actual OFI count: %d\n", buf[0], buf[1], buf[2], buf[3]);
 }
 #endif
 
@@ -1449,7 +1452,7 @@ static hg_return_t margo_cb(const struct hg_cb_info *info)
    
 	  #ifdef MERCURY_PROFILING
           /* Read the exported PVAR data from the Mercury Profiling Interface */
-          //margo_read_pvar_data(mid);
+          //margo_read_pvar_data(mid, req->handle);
           #endif
         }
     } else if(req->rpc_breadcrumb != 0 && req->is_server == 1) {
@@ -1458,6 +1461,7 @@ static hg_return_t margo_cb(const struct hg_cb_info *info)
           uint64_t * temp;
           mid = margo_hg_handle_get_instance(req->handle);
           assert(mid);
+          margo_read_pvar_data(mid, req->handle);
 
           /* the "1" indicates that this a target-side breadcrumb */
           margo_breadcrumb_measure(mid, req, 1);
@@ -1812,7 +1816,7 @@ hg_return_t margo_respond(
       assert(treq != NULL);
     
       #ifdef MERCURY_PROFILING
-      margo_read_pvar_data(mid, handle);
+      //margo_read_pvar_data(mid, handle);
       #endif
 
       ABT_key_get(request_order_key, (void**)(&order));
