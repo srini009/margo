@@ -621,8 +621,11 @@ static void margo_finalize_mercury_profiling_interface(hg_class_t *hg_class) {
 
 /* Query the Mercury PVAR interface */
 static void margo_read_pvar_data(margo_instance_id mid, hg_handle_t handle, int index, void *buf) {
+   double * temp = (double *)malloc(sizeof(double));
 
-   HG_Prof_pvar_read(pvar_session, pvar_handle[index], handle, (void*)buf);
+   HG_Prof_pvar_read(pvar_session, pvar_handle[index], handle, (void*)temp);
+   *(double*)buf += *(double*)temp;
+   free(temp);
 }
 #endif
 
@@ -2462,7 +2465,7 @@ static void print_profile_data(margo_instance_id mid, FILE *file, const char* na
         avg = 0;
 
     /* first line is breadcrumb data */
-    fprintf(file, "%s,%.9f,%lu,%lu,%d,%.9f,%.9f,%.9f,%.9f,%.9f,%lu,%lu,%lu,%lu,%lu,%lu,%lu\n", name, avg, data->key.rpc_breadcrumb, data->key.addr_hash, data->type, data->stats.cumulative, data->stats.handler_time, data->stats.completion_callback_time, data->stats.min, data->stats.max, data->stats.count, data->stats.abt_pool_size_hwm, data->stats.abt_pool_size_lwm, data->stats.abt_pool_size_cumulative, data->stats.abt_pool_total_size_hwm, data->stats.abt_pool_total_size_lwm, data->stats.abt_pool_total_size_cumulative);
+    fprintf(file, "%s,%.9f,%lu,%lu,%d,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%lu,%.9f,%.9f,%lu,%lu,%lu,%lu,%lu,%lu,%lu\n", name, avg, data->key.rpc_breadcrumb, data->key.addr_hash, data->type, data->stats.cumulative, data->stats.handler_time, data->stats.completion_callback_time, data->stats.input_serial_time, data->stats.input_deserial_time, data->stats.output_serial_time, data->stats.internal_rdma_transfer_time, data->stats.internal_rdma_transfer_size, data->stats.min, data->stats.max, data->stats.count, data->stats.abt_pool_size_hwm, data->stats.abt_pool_size_lwm, data->stats.abt_pool_size_cumulative, data->stats.abt_pool_total_size_hwm, data->stats.abt_pool_total_size_lwm, data->stats.abt_pool_total_size_cumulative);
 
     /* second line is sparkline data for the given breadcrumb*/
     fprintf(file, "%s,%d;", name, data->type);
@@ -3183,7 +3186,6 @@ static void margo_breadcrumb_measure(margo_instance_id mid, margo_request req, b
     } else {
       stat->stats.cumulative += elapsed;
       stat->stats.handler_time = 0;
-      stat->stats.completion_callback_time = 0;
       #ifdef MERCURY_PROFILING
       /* Read the exported PVAR data from the Mercury Profiling Interface */
       margo_read_pvar_data(mid, req->handle, 5, (void*)&stat->stats.completion_callback_time);
