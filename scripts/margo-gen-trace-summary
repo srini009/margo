@@ -317,6 +317,52 @@ class TraceGenerator:
 		for req in self.request_list:
 			print (req.req_id, req.latency)
 
+	def generatetaillatency(self):
+		client_latency_arr = list()	
+		server_latency_arr = list()	
+		for req in self.request_list:
+			client_latency_arr.append(req.latency)
+			server_latency = (req.sorted_event_list[len(req.sorted_event_list) - 2].ts - req.sorted_event_list[1].ts)
+			if server_latency < 0:
+				server_latency = 0
+			server_latency_arr.append(server_latency)
+		client_latency_arr.sort(reverse=True)
+		server_latency_arr.sort(reverse=True)
+		fig, ax = plt.subplots(figsize=(6, 3))
+		fig.subplots_adjust(bottom=0.15, left=0.2)
+		ax.plot(client_latency_arr)
+		client_99 = np.percentile(client_latency_arr, 99)
+		client_median = np.median(client_latency_arr)
+		client_txt = 'Client 99 percentile: ' + str(client_99) + ', median: ' + str(client_median)
+		ax.text(0.5, 0.5, client_txt, horizontalalignment='center', verticalalignment='center', color='blue', fontsize=6, transform=ax.transAxes)
+		server_99 = np.percentile(server_latency_arr, 99)
+		server_median = np.median(server_latency_arr)
+		server_txt = 'Server 99 percentile: ' + str(server_99) + ', median: ' + str(server_median)
+		ax.text(0.5, 0.7, server_txt, horizontalalignment='center', verticalalignment='top', color='orange', fontsize=6, transform=ax.transAxes)
+		ax.plot(server_latency_arr)
+		ax.set_xticks([])
+		ax.set_xlabel('RPCs sorted by descending order of latency, blue=client, orange=server')
+		ax.set_ylabel('Latency (s)')
+		plt.title('Client and server latencies sorted in descending order')
+		plt.savefig(self.tt, format='pdf')
+		plt.close()
+	
+	def generatetotaltimediff(self):
+		time = 0.0
+		server_time = 0.0
+		p = 0
+		n = 0
+		for req in self.request_list:
+			local_time = (req.sorted_event_list[len(req.sorted_event_list)-1].ts - req.sorted_event_list[len(req.sorted_event_list)-2].ts)
+			server_time += (req.sorted_event_list[len(req.sorted_event_list) - 2].ts - req.sorted_event_list[1].ts)
+			if local_time > 0.0:
+				time += local_time
+				p += 1
+			else:
+				n += 1
+		percent = (float(p)/float(len(self.request_list)))*100.0
+		print ("Time diff, server time, total requests, percent positive are: ", time, server_time, len(self.request_list), percent)
+		
 	def finalize(self):
 		self.tt.close()	
 
@@ -331,6 +377,8 @@ def main():
 	t.sorteventsinrequest()
 	t.generatezipkintraces()
 	t.generatereqmetadata()
+	t.generatetaillatency()
+	t.generatetotaltimediff()
 	t.finalize()
 
 main()
