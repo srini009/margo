@@ -129,13 +129,13 @@ class ProfileGenerator:
 			v = perf_arr[i]
 			ax[i+1].plot(v)
 
-			for k1, v1 in ax[i+1].spines.items():
-				v1.set_visible(False)
+			#for k1, v1 in ax[i+1].spines.items():
+			#	v1.set_visible(False)
 
 			ax[i+1].set_xticks([])
-			ax[i+1].set_yticks([])
-			ax[i+1].plot(len(v) - 1, v[len(v) - 1], 'r.')
-			ax[i+1].fill_between(range(len(v)), v, len(v)*[min(v)], alpha=0.1)
+			#ax[i+1].set_yticks([])
+			#ax[i+1].plot(len(v) - 1, v[len(v) - 1], 'r.')
+			#ax[i+1].fill_between(range(len(v)), v, len(v)*[min(v)], alpha=0.1)
 			ax[i+1].set_title((objects[i]).strip('\n'), fontsize=8)
 
 		plt.savefig(self.pp, format='pdf')
@@ -251,9 +251,10 @@ class ProfileGenerator:
 				#Even lines contain breadcrumb data
 				name, avg, rpc_breadcrumb, \
 					addr_hash, origin_or_target, \
-						cumulative, handler_time, completion_callback_time, _min, _max, count, \
+						cumulative, handler_time, completion_callback_time, input_serial_time, input_deserial_time, output_serial_time, internal_rdma_transfer_time, internal_rdma_transfer_size,_min, _max, count, \
 							abt_pool_size_hwm, abt_pool_size_lwm, abt_pool_size_cumulative,  \
-								abt_pool_total_size_hwm, abt_pool_total_size_lwm, abt_pool_total_size_cumulative = breadcrumb_line.split(',', 17)
+								abt_pool_total_size_hwm, abt_pool_total_size_lwm, abt_pool_total_size_cumulative = breadcrumb_line.split(',', 22)
+				print ("completion_callback_time %lf, input_serial_time %lf, input_deserial_time %lf, output_serial_time %lf, internal_rdma_transfer_time %lf, internal_rdma_transfer_size %d", completion_callback_time, input_serial_time, input_deserial_time, output_serial_time, internal_rdma_transfer_time, internal_rdma_transfer_size) 
 				origin_or_target = int(origin_or_target)
 				addr_hash = int(addr_hash)
 
@@ -282,7 +283,7 @@ class ProfileGenerator:
 				for v in value_list[1:]:
 					if v != "\n":
 						t, c, i = v.split(',')
-						if(origin_or_target):
+						if(not origin_or_target):
 							self.countsparklines[(name, int(i))].append(float(c))
 						self.timesparklines[origin_or_target][(name, int(i))].append(float(t))
 			
