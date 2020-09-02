@@ -277,6 +277,7 @@ class ProfileGenerator:
 				self.completion_callback_time[origin_or_target][name] = self.completion_callback_time[origin_or_target].get(name, 0.0) + float(completion_callback_time)
 				if (origin_or_target == 0):
 					self.input_serial_deserial_time[origin_or_target][name] = self.input_serial_deserial_time[origin_or_target].get(name, 0.0) + float(input_serial_time)
+					self.cumulative[origin_or_target][name] = self.cumulative[origin_or_target][name] -  self.input_serial_deserial_time[origin_or_target][name] - self.completion_callback_time[origin_or_target][name] #Adjust the timings to prevent double-counting
 					self.output_serial_deserial_time[origin_or_target][name] = 0.0
 		
 					self.internal_rdma_transfer_time[origin_or_target][name] = 0.0
@@ -287,6 +288,7 @@ class ProfileGenerator:
 		
 					self.internal_rdma_transfer_time[origin_or_target][name] = self.internal_rdma_transfer_time[origin_or_target].get(name, 0.0) + float(internal_rdma_transfer_time)
 					self.internal_rdma_transfer_size[origin_or_target][name] = self.internal_rdma_transfer_size[origin_or_target].get(name, 0.0) + int(internal_rdma_transfer_size)
+					self.cumulative[origin_or_target][name] = self.cumulative[origin_or_target][name] -  self.input_serial_deserial_time[origin_or_target][name] - self.output_serial_deserial_time[origin_or_target][name] - self.internal_rdma_transfer_time[origin_or_target][name] #Adjust the timings to prevent double-counting
 
 				self.countstat[origin_or_target][name].append(int(count))
 				self.cumulativestat[origin_or_target][name].append(float(cumulative))
@@ -372,7 +374,7 @@ class ProfileGenerator:
 	# 0 = origin, 1 = target
 	def gencumulativegraph(self):
 		graph_name = 'Cumulative Time'
-		labels = [['Origin', 'Origin Callback Completion Time', 'Origin Input Serialization Time'], ['Target ULT Execution Time', 'Target ULT Handler Time', 'Target Callback Completion Time', 'Target Input Deserialization Time', 'Target Output Serialization Time', 'Target Internal RDMA Transfer Time']]
+		labels = [['Origin (Exclusive)', 'Origin Callback Completion Time', 'Origin Input Serialization Time'], ['Target ULT Execution Time (Exclusive)', 'Target ULT Handler Time', 'Target Callback Completion Time', 'Target Input Deserialization Time', 'Target Output Serialization Time', 'Target Internal RDMA Transfer Time']]
 		perf_arr = []
 		txt = 'Sort breadcrumbs by cumulative time on the origin \n Display top-5 breadcrumbs in descending order of cumulative time on origin and target'
 
