@@ -26,7 +26,7 @@
 #endif
 
 #define DEFAULT_MERCURY_PROGRESS_TIMEOUT_UB 100 /* 100 milliseconds */
-#define DEFAULT_MERCURY_HANDLE_CACHE_SIZE 32
+#define DEFAULT_MERCURY_HANDLE_CACHE_SIZE 128
 
 #define MARGO_SPARKLINE_TIMESLICE 1000
 #define MARGO_SYSTEM_STATS_COLLECTION_TIMESLICE 0.5
@@ -1377,6 +1377,7 @@ static void margo_internal_generate_trace_event(margo_instance_id mid, uint64_t 
    mid->trace_records[mid->trace_record_index].ts = ABT_get_wtime();
    mid->trace_records[mid->trace_record_index].rpc = rpc;
    mid->trace_records[mid->trace_record_index].ev = ev;
+   margo_read_pvar_data(mid, NULL, 3, (void*)&mid->trace_records[mid->trace_record_index].ofi_events_read);
    ABT_pool_get_total_size(mid->handler_pool, &(mid->trace_records[mid->trace_record_index].metadata.abt_pool_total_size));
    ABT_pool_get_size(mid->handler_pool, &(mid->trace_records[mid->trace_record_index].metadata.abt_pool_size));
    mid->trace_records[mid->trace_record_index].metadata.mid = mid->self_addr_hash;
@@ -2780,7 +2781,7 @@ void margo_trace_dump(margo_instance_id mid, const char* file, int uniquify)
     }
 
     for(i = 0; i < mid->trace_record_index; i++) {
-      fprintf(outfile, "%lu, %.9f, %lu, %d, %d, %d, %lu, %d, %d, %lu\n", mid->trace_records[i].trace_id, mid->trace_records[i].ts, mid->trace_records[i].rpc, mid->trace_records[i].ev, mid->trace_records[i].metadata.abt_pool_size, mid->trace_records[i].metadata.abt_pool_total_size, mid->trace_records[i].metadata.mid, mid->trace_records[i].order, mid->trace_id_counter, mid->trace_records[i].metadata.usage.ru_maxrss);
+      fprintf(outfile, "%lu, %.9f, %lu, %d, %d, %d, %lu, %d, %d, %lu, %lu\n", mid->trace_records[i].trace_id, mid->trace_records[i].ts, mid->trace_records[i].rpc, mid->trace_records[i].ev, mid->trace_records[i].metadata.abt_pool_size, mid->trace_records[i].metadata.abt_pool_total_size, mid->trace_records[i].metadata.mid, mid->trace_records[i].order, mid->trace_id_counter, mid->trace_records[i].metadata.usage.ru_maxrss, mid->trace_records[i].ofi_events_read);
 
       /* Below is the chrome-compatible format */
       /*if(mid->trace_records[i].ev == 0 || mid->trace_records[i].ev == 3) {

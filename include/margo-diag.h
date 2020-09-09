@@ -134,6 +134,7 @@ struct margo_trace_record
   uint64_t trace_id;
   double ts;
   uint64_t rpc;
+  size_t ofi_events_read;
   ev_type ev;
   uint64_t order;
   struct trace_metadata metadata;
