@@ -22,7 +22,7 @@ global_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b
 global_hostcolor = dict()
 
 class Event:
-	def __init__(self, ts, pool_size, blocked_tasks, ev, mid, order, rpc, max_rss, pid):
+	def __init__(self, ts, pool_size, blocked_tasks, ev, mid, order, rpc, max_rss, pid, ofi_events_read):
 		self.ts = ts
 		self.pool_size = pool_size
 		self.blocked_tasks = blocked_tasks
@@ -32,6 +32,7 @@ class Event:
 		self.order = order
 		self.max_rss = max_rss
 		self.pid = pid
+		self.ofi_events_read = ofi_events_read
 
 class Span:
 	def __init__(self, name, id_, service_name, start_ts, end_ts, ts, start_type, end_type, address, parent_span):
@@ -162,7 +163,7 @@ class RequestOpMetadata:
 		
 	def graphtimeseriesinfo(self, tt, rpc2name, pidtohost):
 		area = np.pi*3
-		names = [ 'latency (s)', 'max_rss (KB)', 'tasks_eligible_to_run', 'blocked_tasks', 'num_events_in_req']
+		names = [ 'latency (s)', 'max_rss (KB)', 'tasks_eligible_to_run', 'blocked_tasks', 'num_ofi_events_read']
 		start_time = self.time_series_data[0][0]
 
 		fig, ax = plt.subplots(len(names)+1, figsize=(15,15))
@@ -172,7 +173,7 @@ class RequestOpMetadata:
 max_rss = Maximum of resident set size highwatermark (from getrusage) for all instrumentation points in the path of the request.\n    Legend indicates the node with this associated value. \n \
 tasks_eligible_to_run (abt_pool_size) = Maximum value of abt_pool_size across all instrumentation points in the path of the request.\n    Legend indicates the node with this associated value. \n \
 blocked tasks (abt_total_pool_size - abt_pool_size) = Maximum value for total blocked tasks all instrumentation points in the path of the request.\n    Legend indicates the node with this associated value. \n \
-num_events_in_req = Number of events in the request (correlates with number of microservice operations for request).\n    Legend indicates the node first contacted for servicing the request from an end-client."
+num_ofi_events_read = Most recent number of OFI events read by progress engine when response was received by client\n    Legend indicates the node first contacted for servicing the request from an end-client."
 
 		ax[0].text(0, 0.5, txt, style='italic',
 			bbox={'facecolor': 'red', 'alpha': 0.5, 'pad': 10}, horizontalalignment='left')
@@ -241,9 +242,9 @@ class TraceGenerator:
 
 			contents_ = contents[3 + num_registered_rpcs:]
 			for i in range(0, len(contents_)):
-				req_id, ts, rpc, ev, pool_size, total_pool_size, mid, order, counter, max_rss = contents_[i].split(",")
+				req_id, ts, rpc, ev, pool_size, total_pool_size, mid, order, counter, max_rss, ofi_events_read = contents_[i].split(",")
 				blocked_tasks = int(total_pool_size) - int(pool_size)
-				self.event_dict[req_id].append(Event(float(ts), int(pool_size), blocked_tasks, int(ev), mid, int(order), int(rpc), int(max_rss), int(pid)))
+				self.event_dict[req_id].append(Event(float(ts), int(pool_size), blocked_tasks, int(ev), mid, int(order), int(rpc), int(max_rss), int(pid), int(ofi_events_read)))
 			f1.close()
 
 	# Go through every request and sort the events inside the request
@@ -302,7 +303,7 @@ class TraceGenerator:
 			rss.sort(key = lambda x: x[0], reverse=True)
 			blocked_tasks.sort(key = lambda x: x[0], reverse=True)
 			abt_pool_size.sort(key = lambda x: x[0], reverse=True)
-			request_time_series_data[req.op].append((req.sorted_event_list[0].ts, (req.latency, self.pidtohost[int(req.pid)]), rss[0], abt_pool_size[0], blocked_tasks[0], (len(req.sorted_event_list), self.pidtohost[int(req.pid)]), req.pid))
+			request_time_series_data[req.op].append((req.sorted_event_list[0].ts, (req.latency, self.pidtohost[int(req.pid)]), rss[0], abt_pool_size[0], blocked_tasks[0], (req.sorted_event_list[len(req.sorted_event_list)-1].ofi_events_read, self.pidtohost[int(req.pid)]), req.pid))
 
 		# For every op, sort requests based on timestamp
 		for op in request_time_series_data.keys():
@@ -375,10 +376,10 @@ def main():
 	t = TraceGenerator()
 	t.readfiles()
 	t.sorteventsinrequest()
-	t.generatezipkintraces()
+	#t.generatezipkintraces()
 	t.generatereqmetadata()
-	t.generatetaillatency()
-	t.generatetotaltimediff()
+	#t.generatetaillatency()
+	#t.generatetotaltimediff()
 	t.finalize()
 
 main()
