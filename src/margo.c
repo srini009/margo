@@ -1377,7 +1377,9 @@ static void margo_internal_generate_trace_event(margo_instance_id mid, uint64_t 
    mid->trace_records[mid->trace_record_index].ts = ABT_get_wtime();
    mid->trace_records[mid->trace_record_index].rpc = rpc;
    mid->trace_records[mid->trace_record_index].ev = ev;
+   #ifdef MERCURY_PROFILING
    margo_read_pvar_data(mid, NULL, 3, (void*)&mid->trace_records[mid->trace_record_index].ofi_events_read);
+   #endif
    ABT_pool_get_total_size(mid->handler_pool, &(mid->trace_records[mid->trace_record_index].metadata.abt_pool_total_size));
    ABT_pool_get_size(mid->handler_pool, &(mid->trace_records[mid->trace_record_index].metadata.abt_pool_size));
    mid->trace_records[mid->trace_record_index].metadata.mid = mid->self_addr_hash;
