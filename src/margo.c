@@ -8,7 +8,9 @@
 #include <unistd.h>
 #include <errno.h>
 #include <abt.h>
+#ifdef ABT_PROFILING
 #include <abtx_prof.h>
+#endif
 #include <stdlib.h>
 
 #include <margo-config.h>
@@ -52,7 +54,9 @@ static void margo_finalize_mercury_profiling_interface(hg_class_t *hg_class);
 static void margo_read_pvar_data(margo_instance_id mid, hg_handle_t handle, int index, void* buf);
 #endif
 
+#ifdef ABT_PROFILING
 ABTX_prof_context g_prof_context;
+#endif
 
 static void margo_internal_breadcrumb_handler_set(uint64_t rpc_breadcrumb);
  
@@ -401,7 +405,9 @@ margo_instance_id margo_init_opt(const char *addr_str, int mode, const struct hg
     if (ABT_initialized() == ABT_ERR_UNINITIALIZED)
     {
         ret = ABT_init(0, NULL); /* XXX: argc/argv not currently used by ABT ... */
+	#ifdef ABT_PROFILING
         ABTX_prof_init(&g_prof_context); 
+	#endif
 
         if(ret != 0) goto err;
         g_margo_abt_init = 1;
@@ -500,7 +506,9 @@ margo_instance_id margo_init_opt(const char *addr_str, int mode, const struct hg
        uint64_t hash;
 
        margo_profile_start(mid);
+       #ifdef ABT_PROFILING
        ABTX_prof_start(g_prof_context, ABTX_PROF_MODE_DETAILED);
+       #endif
 
        GET_SELF_ADDR_STR(mid, name);
        HASH_JEN(name, strlen(name), hash); /*record own address in the breadcrumb */
@@ -851,11 +859,15 @@ void margo_finalize(margo_instance_id mid)
       margo_system_stats_dump(mid, "profile", 1);
       margo_trace_dump(mid, "profile", 1);
 
+      #ifdef ABT_PROFILING
       ABTX_prof_stop(g_prof_context); 
       ABTX_prof_print(g_prof_context, stdout, ABTX_PRINT_MODE_SUMMARY| ABTX_PRINT_MODE_FANCY);
+      #endif
     }
 
+    #ifdef ABT_PROFILING
     ABTX_prof_finalize(g_prof_context);
+    #endif
 
     #ifdef APEX_PROFILING
     /* APEX Finalize */
