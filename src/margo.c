@@ -1942,6 +1942,7 @@ hg_return_t margo_bulk_transfer(
     size_t size)
 {  
 
+    double start = ABT_get_wtime();
     #ifdef APEX_PROFILING
     apex_profiler_handle internal_profiler = apex_start(APEX_FUNCTION_ADDRESS, &margo_bulk_itransfer_internal);
     #endif
@@ -1959,6 +1960,20 @@ hg_return_t margo_bulk_transfer(
     #ifdef APEX_PROFILING
     apex_stop(profiler);
     #endif
+    double end = ABT_get_wtime() - start;
+    double bw;
+    bw = ((double)size/end)/1000000;
+    hg_addr_t self_addr;
+    margo_addr_self(mid, &self_addr);
+    char dest_addr[2048], source_addr[2048];
+    size_t d_addr_sz=2048, s_addr_sz=2048;
+    margo_addr_to_string(mid, source_addr, &s_addr_sz, origin_addr);
+    margo_addr_to_string(mid, dest_addr, &d_addr_sz, self_addr);
+    struct margo_request_struct* treq;
+    ABT_key_get(target_timing_key, (void**)(&treq));
+    assert(treq != NULL);
+    fprintf(stderr, "Effective bandwidth: %f MBytes/sec, size: %d, time: %f \n", bw, size, end); 
+
     return hret;
 }
 

@@ -698,6 +698,8 @@ hg_return_t margo_destroy(
  */
 #define margo_free_output HG_Free_output
 
+#define margo_get_wtime ABT_get_wtime
+
 /**
  * Forward an RPC request to a remote host
  * @param [in] provider ID (may be MARGO_DEFAULT_PROVIDER_ID)
