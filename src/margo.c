@@ -1981,7 +1981,7 @@ hg_return_t margo_bulk_transfer(
     assert(treq != NULL);
     treq->bulk_transfer_bw = bw;
     treq->bulk_transfer_start = start;
-    treq->bulk_transfer_end = end;
+    treq->bulk_transfer_end = end+start;
     fprintf(stderr, "Effective bandwidth: %f MBytes/sec, size: %d, time: %f \n", bw, size, end);
 
     return hret;

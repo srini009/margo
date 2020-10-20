@@ -249,7 +249,8 @@ class TraceGenerator:
 			contents_ = contents[3 + num_registered_rpcs:]
 			for i in range(0, len(contents_)):
 				req_id, ts, rpc, ev, pool_size, total_pool_size, mid, order, counter, max_rss, ofi_events_read, bw, bw_start, bw_end = contents_[i].split(",")
-				self.host_bw_raw_data[str(hostname)].append((float(bw_start), float(bw_end), float(bw)))
+				if(float(bw)):
+					self.host_bw_raw_data[str(hostname)].append((float(bw_start), float(bw_end), float(bw)))
 				blocked_tasks = int(total_pool_size) - int(pool_size)
 				self.event_dict[req_id].append(Event(float(ts), int(pool_size), blocked_tasks, int(ev), mid, int(order), int(rpc), int(max_rss), int(pid), int(ofi_events_read), float(bw), float(bw_start), float(bw_end)))
 			f1.close()
