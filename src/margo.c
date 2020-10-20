@@ -218,6 +218,9 @@ struct margo_request_struct {
     uint64_t is_server;
     double handler_time;
     double ult_time;
+    double bulk_transfer_bw;
+    double bulk_transfer_start;
+    double bulk_transfer_end;
     ABT_timer abt_timer;
 };
 
@@ -1382,7 +1385,7 @@ hg_return_t margo_destroy(hg_handle_t handle)
     return hret;
 }
 
-static void margo_internal_generate_trace_event(margo_instance_id mid, uint64_t trace_id, ev_type ev, uint64_t rpc, uint64_t order)
+static void margo_internal_generate_trace_event(margo_instance_id mid, uint64_t trace_id, ev_type ev, uint64_t rpc, uint64_t order, double bw, double bw_start, double bw_end)
 {
 
    mid->trace_records[mid->trace_record_index].trace_id = trace_id;
@@ -1392,6 +1395,9 @@ static void margo_internal_generate_trace_event(margo_instance_id mid, uint64_t 
    #ifdef MERCURY_PROFILING
    margo_read_pvar_data(mid, NULL, 3, (void*)&mid->trace_records[mid->trace_record_index].ofi_events_read);
    #endif
+   mid->trace_records[mid->trace_record_index].bulk_transfer_bw = bw;
+   mid->trace_records[mid->trace_record_index].bulk_transfer_start = bw_start;
+   mid->trace_records[mid->trace_record_index].bulk_transfer_end = bw_end;
    ABT_pool_get_total_size(mid->handler_pool, &(mid->trace_records[mid->trace_record_index].metadata.abt_pool_total_size));
    ABT_pool_get_size(mid->handler_pool, &(mid->trace_records[mid->trace_record_index].metadata.abt_pool_size));
    mid->trace_records[mid->trace_record_index].metadata.mid = mid->self_addr_hash;
@@ -1439,7 +1445,7 @@ static hg_return_t margo_cb(const struct hg_cb_info *info)
           if(ret != HG_SUCCESS)
             return(ret);
 
-          margo_internal_generate_trace_event(mid, req->trace_id, cr, req->current_rpc, (*temp) + 1);
+          margo_internal_generate_trace_event(mid, req->trace_id, cr, req->current_rpc, (*temp) + 1, 0, 0, 0);
    
         }
     } else if(req->rpc_breadcrumb != 0 && req->is_server == 1) {
@@ -1619,7 +1625,7 @@ static hg_return_t margo_provider_iforward_internal(
         req->trace_id = (*metadata).trace_id;
         req->start_time = ABT_get_wtime();
 
-        margo_internal_generate_trace_event(mid, (*metadata).trace_id, cs, (*metadata).current_rpc, (*metadata).order);
+        margo_internal_generate_trace_event(mid, (*metadata).trace_id, cs, (*metadata).current_rpc, (*metadata).order, 0, 0, 0);
     
         /* add information about the server and provider servicing the request */
         req->provider_id = provider_id; /*store id of provider servicing the request */
@@ -1810,7 +1816,7 @@ hg_return_t margo_respond(
         return(ret);
 
       (*temp) = (*order) + 1;
-      margo_internal_generate_trace_event(mid, treq->trace_id, ss, treq->current_rpc, (*order) + 1);
+      margo_internal_generate_trace_event(mid, treq->trace_id, ss, treq->current_rpc, (*order) + 1, treq->bulk_transfer_bw, treq->bulk_transfer_start, treq->bulk_transfer_end);
     }
 
     hg_return_t hret;
@@ -1940,8 +1946,10 @@ hg_return_t margo_bulk_transfer(
     hg_bulk_t local_handle,
     size_t local_offset,
     size_t size)
-{  
+{
 
+    double start = ABT_get_wtime();  
+ 
     #ifdef APEX_PROFILING
     apex_profiler_handle internal_profiler = apex_start(APEX_FUNCTION_ADDRESS, &margo_bulk_itransfer_internal);
     #endif
@@ -1959,6 +1967,23 @@ hg_return_t margo_bulk_transfer(
     #ifdef APEX_PROFILING
     apex_stop(profiler);
     #endif
+    double end = ABT_get_wtime() - start;
+    double bw;
+    bw = ((double)size/end)/1000000;
+    hg_addr_t self_addr;
+    margo_addr_self(mid, &self_addr);
+    char dest_addr[2048], source_addr[2048];
+    size_t d_addr_sz=2048, s_addr_sz=2048;
+    margo_addr_to_string(mid, source_addr, &s_addr_sz, origin_addr);
+    margo_addr_to_string(mid, dest_addr, &d_addr_sz, self_addr);
+    struct margo_request_struct* treq;
+    ABT_key_get(target_timing_key, (void**)(&treq));
+    assert(treq != NULL);
+    treq->bulk_transfer_bw = bw;
+    treq->bulk_transfer_start = start;
+    treq->bulk_transfer_end = end;
+    fprintf(stderr, "Effective bandwidth: %f MBytes/sec, size: %d, time: %f \n", bw, size, end);
+
     return hret;
 }
 
@@ -2795,7 +2820,7 @@ void margo_trace_dump(margo_instance_id mid, const char* file, int uniquify)
     }
 
     for(i = 0; i < mid->trace_record_index; i++) {
-      fprintf(outfile, "%lu, %.9f, %lu, %d, %d, %d, %lu, %d, %d, %lu, %lu\n", mid->trace_records[i].trace_id, mid->trace_records[i].ts, mid->trace_records[i].rpc, mid->trace_records[i].ev, mid->trace_records[i].metadata.abt_pool_size, mid->trace_records[i].metadata.abt_pool_total_size, mid->trace_records[i].metadata.mid, mid->trace_records[i].order, mid->trace_id_counter, mid->trace_records[i].metadata.usage.ru_maxrss, mid->trace_records[i].ofi_events_read);
+      fprintf(outfile, "%lu, %.9f, %lu, %d, %d, %d, %lu, %d, %d, %lu, %lu, %.9f, %.9f, %.9f\n", mid->trace_records[i].trace_id, mid->trace_records[i].ts, mid->trace_records[i].rpc, mid->trace_records[i].ev, mid->trace_records[i].metadata.abt_pool_size, mid->trace_records[i].metadata.abt_pool_total_size, mid->trace_records[i].metadata.mid, mid->trace_records[i].order, mid->trace_id_counter, mid->trace_records[i].metadata.usage.ru_maxrss, mid->trace_records[i].ofi_events_read, mid->trace_records[i].bulk_transfer_bw,  mid->trace_records[i].bulk_transfer_start,  mid->trace_records[i].bulk_transfer_end);
 
       /* Below is the chrome-compatible format */
       /*if(mid->trace_records[i].ev == 0 || mid->trace_records[i].ev == 3) {
@@ -3282,7 +3307,7 @@ void __margo_internal_start_server_time(margo_instance_id mid, hg_handle_t handl
          * led to that point.
          */
         ABT_key_set(target_timing_key, req);
-        margo_internal_generate_trace_event(mid, (*metadata).trace_id, sr, (*metadata).current_rpc, (*metadata).order + 1);
+        margo_internal_generate_trace_event(mid, (*metadata).trace_id, sr, (*metadata).current_rpc, (*metadata).order + 1, 0, 0, 0);
         margo_internal_request_order_set((*metadata).order + 1);
         margo_internal_breadcrumb_handler_set((*metadata).rpc_breadcrumb << 16);
         margo_internal_trace_id_set((*metadata).trace_id);

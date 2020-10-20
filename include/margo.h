@@ -877,6 +877,9 @@ hg_return_t margo_bulk_free(
  *
  * \return HG_SUCCESS or corresponding HG error code
  */
+
+#define margo_get_wtime ABT_get_wtime
+
 #define margo_bulk_ref_incr HG_Bulk_ref_incr
 
 /**

@@ -138,6 +138,9 @@ struct margo_trace_record
   ev_type ev;
   uint64_t order;
   struct trace_metadata metadata;
+  double bulk_transfer_bw;
+  double bulk_transfer_start;
+  double bulk_transfer_end;
 };
 
 struct margo_system_stat
