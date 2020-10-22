@@ -1125,6 +1125,18 @@ void margo_diag_dump(margo_instance_id mid, const char* file, int uniquify);
 void margo_profile_dump(margo_instance_id mid, const char* file, int uniquify);
 
 /**
+ * Appends profile statistics (enabled via margo_profile_start()) to specified 
+ * output file.
+ *
+ * @param [in] start Start time returned by ABT_get_wtime()
+ * @param [in] stop Stop time returned by ABT_get_wtime()
+ * @param [in] size Size of the data associated with this operation
+ * @param [in] name Name of the metric used for display
+ * @returns void
+ */
+void margo_set_custom_perf_metric(double start, double stop, size_t size, const char *name);
+
+/**
  * Appends system statistics (enabled via margo_profile_start()) to specified 
  * output file.
  *

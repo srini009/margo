@@ -221,6 +221,10 @@ struct margo_request_struct {
     double bulk_transfer_bw;
     double bulk_transfer_start;
     double bulk_transfer_end;
+    double operation_start_time;
+    double operation_stop_time;
+    double operation_size;
+    char operation_name[100];
     ABT_timer abt_timer;
 };
 
@@ -1385,7 +1389,19 @@ hg_return_t margo_destroy(hg_handle_t handle)
     return hret;
 }
 
-static void margo_internal_generate_trace_event(margo_instance_id mid, uint64_t trace_id, ev_type ev, uint64_t rpc, uint64_t order, double bw, double bw_start, double bw_end)
+void margo_set_custom_perf_metric(double start, double stop, size_t size, const char *name)
+{
+   struct margo_request_struct* treq;
+   ABT_key_get(target_timing_key, (void**)(&treq));
+   treq->operation_start_time = start;
+   treq->operation_stop_time = stop;
+   treq->operation_size = size;
+   strcpy(treq->operation_name, name);
+
+   return;
+}
+
+static void margo_internal_generate_trace_event(margo_instance_id mid, uint64_t trace_id, ev_type ev, uint64_t rpc, uint64_t order, double bw, double bw_start, double bw_end, double op_bw, double op_start, double op_end)
 {
 
    mid->trace_records[mid->trace_record_index].trace_id = trace_id;
@@ -1398,6 +1414,9 @@ static void margo_internal_generate_trace_event(margo_instance_id mid, uint64_t 
    mid->trace_records[mid->trace_record_index].bulk_transfer_bw = bw;
    mid->trace_records[mid->trace_record_index].bulk_transfer_start = bw_start;
    mid->trace_records[mid->trace_record_index].bulk_transfer_end = bw_end;
+   mid->trace_records[mid->trace_record_index].operation_bw = op_bw;
+   mid->trace_records[mid->trace_record_index].operation_start = op_start;
+   mid->trace_records[mid->trace_record_index].operation_stop = op_end;
    ABT_pool_get_total_size(mid->handler_pool, &(mid->trace_records[mid->trace_record_index].metadata.abt_pool_total_size));
    ABT_pool_get_size(mid->handler_pool, &(mid->trace_records[mid->trace_record_index].metadata.abt_pool_size));
    mid->trace_records[mid->trace_record_index].metadata.mid = mid->self_addr_hash;
@@ -1445,7 +1464,7 @@ static hg_return_t margo_cb(const struct hg_cb_info *info)
           if(ret != HG_SUCCESS)
             return(ret);
 
-          margo_internal_generate_trace_event(mid, req->trace_id, cr, req->current_rpc, (*temp) + 1, 0, 0, 0);
+          margo_internal_generate_trace_event(mid, req->trace_id, cr, req->current_rpc, (*temp) + 1, 0, 0, 0, 0, 0, 0);
    
         }
     } else if(req->rpc_breadcrumb != 0 && req->is_server == 1) {
@@ -1625,7 +1644,7 @@ static hg_return_t margo_provider_iforward_internal(
         req->trace_id = (*metadata).trace_id;
         req->start_time = ABT_get_wtime();
 
-        margo_internal_generate_trace_event(mid, (*metadata).trace_id, cs, (*metadata).current_rpc, (*metadata).order, 0, 0, 0);
+        margo_internal_generate_trace_event(mid, (*metadata).trace_id, cs, (*metadata).current_rpc, (*metadata).order, 0, 0, 0, 0, 0, 0);
     
         /* add information about the server and provider servicing the request */
         req->provider_id = provider_id; /*store id of provider servicing the request */
@@ -1816,7 +1835,8 @@ hg_return_t margo_respond(
         return(ret);
 
       (*temp) = (*order) + 1;
-      margo_internal_generate_trace_event(mid, treq->trace_id, ss, treq->current_rpc, (*order) + 1, treq->bulk_transfer_bw, treq->bulk_transfer_start, treq->bulk_transfer_end);
+      double op_bw = (double)((treq->operation_stop_time - treq->operation_start_time)/treq->operation_size);
+      margo_internal_generate_trace_event(mid, treq->trace_id, ss, treq->current_rpc, (*order) + 1, treq->bulk_transfer_bw, treq->bulk_transfer_start, treq->bulk_transfer_end, op_bw, treq->operation_start_time, treq->operation_stop_time);
     }
 
     hg_return_t hret;
@@ -3307,7 +3327,7 @@ void __margo_internal_start_server_time(margo_instance_id mid, hg_handle_t handl
          * led to that point.
          */
         ABT_key_set(target_timing_key, req);
-        margo_internal_generate_trace_event(mid, (*metadata).trace_id, sr, (*metadata).current_rpc, (*metadata).order + 1, 0, 0, 0);
+        margo_internal_generate_trace_event(mid, (*metadata).trace_id, sr, (*metadata).current_rpc, (*metadata).order + 1, 0, 0, 0, 0, 0, 0);
         margo_internal_request_order_set((*metadata).order + 1);
         margo_internal_breadcrumb_handler_set((*metadata).rpc_breadcrumb << 16);
         margo_internal_trace_id_set((*metadata).trace_id);
