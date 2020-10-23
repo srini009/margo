@@ -260,7 +260,8 @@ class TraceGenerator:
 		for req in self.event_dict.keys():
 			ev_list = self.event_dict[req]
 			ev_list.sort(key=lambda x: x.order)
-			self.request_list.append(Request(req, ev_list, ev_list[0].rpc, ev_list[len(ev_list)-1].ts - ev_list[0].ts, ev_list[1].pid))
+			if (len(ev_list) == 4):
+				self.request_list.append(Request(req, ev_list, ev_list[0].rpc, ev_list[len(ev_list)-1].ts - ev_list[0].ts, ev_list[1].pid))
 
 	# Generate individual Zipkin-compatible traces
 	def generatezipkintraces(self):
@@ -368,7 +369,7 @@ class TraceGenerator:
 			ts_buckets.append(i*time_delta)
 		host_bw_data = defaultdict(list)
 		for host in self.host_bw_raw_data.keys():
-			host_bw_data[host] = np.arange(n_buckets)
+			host_bw_data[host] = np.zeros(n_buckets)
 			for req in self.host_bw_raw_data[host]:
 				bw_start = float(req[0])
 				bw_end = float(req[1])
