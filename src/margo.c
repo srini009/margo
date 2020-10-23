@@ -223,7 +223,7 @@ struct margo_request_struct {
     double bulk_transfer_end;
     double operation_start_time;
     double operation_stop_time;
-    double operation_size;
+    size_t operation_size;
     char operation_name[100];
     ABT_timer abt_timer;
 };
@@ -1397,7 +1397,6 @@ void margo_set_custom_perf_metric(double start, double stop, size_t size, const 
    treq->operation_start_time = start;
    treq->operation_stop_time = stop;
    treq->operation_size = size;
-   fprintf(stderr, "Operation start, stop, operation size: %f, %f, %d\n", start, stop, size);
    strcpy(treq->operation_name, name);
 
    return;
@@ -1843,7 +1842,6 @@ hg_return_t margo_respond(
       } else { 
         op_bw = ((double)(treq->operation_size)/(treq->operation_stop_time - treq->operation_start_time))/1000000.0;
       }
-      fprintf(stderr, "Measured size, start time, stop time, and op bw : %d, %f\n", treq->operation_size, treq->operation_start_time, treq->operation_stop_time, op_bw);
       margo_internal_generate_trace_event(mid, treq->trace_id, ss, treq->current_rpc, (*order) + 1, treq->bulk_transfer_bw, treq->bulk_transfer_start, treq->bulk_transfer_end, op_bw, treq->operation_start_time, treq->operation_stop_time);
     }
 
@@ -1855,6 +1853,11 @@ hg_return_t margo_respond(
 
     reqs.handler_time = handler_time;
     reqs.ult_time = ult_time;
+    reqs.bulk_transfer_start = treq->bulk_transfer_start;
+    reqs.bulk_transfer_end = treq->bulk_transfer_end;
+    reqs.operation_start_time = treq->operation_start_time;
+    reqs.operation_stop_time = treq->operation_stop_time;
+    reqs.operation_size = treq->operation_size;
     hret = margo_irespond_internal(handle, out_struct, &reqs);
     if(hret != HG_SUCCESS)
         return hret;
@@ -2533,7 +2536,7 @@ static void print_profile_data(margo_instance_id mid, FILE *file, const char* na
         avg = 0;
 
     /* first line is breadcrumb data */
-    fprintf(file, "%s,%.9f,%lu,%lu,%d,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%lu,%.9f,%.9f,%lu,%lu,%lu,%lu,%lu,%lu,%lu\n", name, avg, data->key.rpc_breadcrumb, data->key.addr_hash, data->type, data->stats.cumulative, data->stats.handler_time, data->stats.completion_callback_time, data->stats.input_serial_time, data->stats.input_deserial_time, data->stats.output_serial_time, data->stats.internal_rdma_transfer_time, data->stats.internal_rdma_transfer_size, data->stats.min, data->stats.max, data->stats.count, data->stats.abt_pool_size_hwm, data->stats.abt_pool_size_lwm, data->stats.abt_pool_size_cumulative, data->stats.abt_pool_total_size_hwm, data->stats.abt_pool_total_size_lwm, data->stats.abt_pool_total_size_cumulative);
+    fprintf(file, "%s,%.9f,%lu,%lu,%d,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%lu,%.9f,%.9f,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%.9f,%.9f\n", name, avg, data->key.rpc_breadcrumb, data->key.addr_hash, data->type, data->stats.cumulative, data->stats.handler_time, data->stats.completion_callback_time, data->stats.input_serial_time, data->stats.input_deserial_time, data->stats.output_serial_time, data->stats.internal_rdma_transfer_time, data->stats.internal_rdma_transfer_size, data->stats.min, data->stats.max, data->stats.count, data->stats.abt_pool_size_hwm, data->stats.abt_pool_size_lwm, data->stats.abt_pool_size_cumulative, data->stats.abt_pool_total_size_hwm, data->stats.abt_pool_total_size_lwm, data->stats.abt_pool_total_size_cumulative, data->stats.bulk_transfer_time, data->stats.operation_time);
 
     /* second line is sparkline data for the given breadcrumb*/
     fprintf(file, "%s,%d;", name, data->type);
@@ -3244,6 +3247,8 @@ static void margo_breadcrumb_measure(margo_instance_id mid, margo_request req, b
       stat->stats.handler_time += req->handler_time;
       stat->stats.completion_callback_time += elapsed;
       elapsed += req->ult_time + req->handler_time;
+      stat->stats.bulk_transfer_time = req->bulk_transfer_end - req->bulk_transfer_start;
+      stat->stats.operation_time = req->operation_stop_time - req->operation_start_time;
       #ifdef MERCURY_PROFILING
       /* Read the exported PVAR data from the Mercury Profiling Interface */
       margo_read_pvar_data(mid, req->handle, 6, (void*)&stat->stats.internal_rdma_transfer_time);
