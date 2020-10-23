@@ -75,6 +75,8 @@ struct breadcrumb_stats
     double input_deserial_time;
     double output_serial_time;
     size_t internal_rdma_transfer_size;
+    double bulk_transfer_time;
+    double operation_time;
 
     /* stats for RPC handler pool sizes */
     /* Total pool size = Total number of runnable items + items waiting on a lock */
