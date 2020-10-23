@@ -258,7 +258,7 @@ class TraceGenerator:
 				if(float(op_bw)):
 					self.host_op_bw_raw_data[str(hostname)].append((float(op_start), float(op_end), float(op_bw)))
 				blocked_tasks = int(total_pool_size) - int(pool_size)
-				self.event_dict[req_id].append(Event(float(ts), int(pool_size), blocked_tasks, int(ev), mid, int(order), int(rpc), int(max_rss), int(pid), int(ofi_events_read), float(bw), float(bw_start), float(bw_end), float(op_bw), float(op_start), float(op_stop))
+				self.event_dict[req_id].append(Event(float(ts), int(pool_size), blocked_tasks, int(ev), mid, int(order), int(rpc), int(max_rss), int(pid), int(ofi_events_read), float(bw), float(bw_start), float(bw_end), float(op_bw), float(op_start), float(op_end)))
 			f1.close()
 
 	# Go through every request and sort the events inside the request
@@ -402,7 +402,7 @@ class TraceGenerator:
 			ts_buckets.append(i*time_delta)
 		host_op_bw_data = defaultdict(list)
 		for host in self.host_op_bw_raw_data.keys():
-			host_op_bw_data[host] = np.arange(n_buckets)
+			host_op_bw_data[host] = np.zeros(n_buckets)
 			for req in self.host_op_bw_raw_data[host]:
 				op_start = float(req[0])
 				op_end = float(req[1])
