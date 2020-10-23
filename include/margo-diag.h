@@ -141,6 +141,11 @@ struct margo_trace_record
   double bulk_transfer_bw;
   double bulk_transfer_start;
   double bulk_transfer_end;
+  double operation_start;
+  double operation_stop;
+  size_t operation_size;
+  double operation_bw;
+  char name[30];
 };
 
 struct margo_system_stat
