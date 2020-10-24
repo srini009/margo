@@ -3247,8 +3247,8 @@ static void margo_breadcrumb_measure(margo_instance_id mid, margo_request req, b
       stat->stats.handler_time += req->handler_time;
       stat->stats.completion_callback_time += elapsed;
       elapsed += req->ult_time + req->handler_time;
-      stat->stats.bulk_transfer_time = req->bulk_transfer_end - req->bulk_transfer_start;
-      stat->stats.operation_time = req->operation_stop_time - req->operation_start_time;
+      stat->stats.bulk_transfer_time += req->bulk_transfer_end - req->bulk_transfer_start;
+      stat->stats.operation_time += req->operation_stop_time - req->operation_start_time;
       #ifdef MERCURY_PROFILING
       /* Read the exported PVAR data from the Mercury Profiling Interface */
       margo_read_pvar_data(mid, req->handle, 6, (void*)&stat->stats.internal_rdma_transfer_time);
