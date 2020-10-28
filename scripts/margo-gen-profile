@@ -274,7 +274,6 @@ class ProfileGenerator:
 							abt_pool_size_hwm, abt_pool_size_lwm, abt_pool_size_cumulative,  \
 								abt_pool_total_size_hwm, abt_pool_total_size_lwm, abt_pool_total_size_cumulative, \
 								bulk_transfer_time, operation_time = breadcrumb_line.split(',', 24)
-				print ("bulk_transfer_time %lf, operation_time %lf", bulk_transfer_time, operation_time) 
 				origin_or_target = int(origin_or_target)
 				addr_hash = int(addr_hash)
 
@@ -299,7 +298,7 @@ class ProfileGenerator:
 					self.operation_time[origin_or_target][name] = self.operation_time[origin_or_target].get(name, 0.0) + float(operation_time)
 					self.internal_rdma_transfer_time[origin_or_target][name] = self.internal_rdma_transfer_time[origin_or_target].get(name, 0.0) + float(internal_rdma_transfer_time)
 					self.internal_rdma_transfer_size[origin_or_target][name] = self.internal_rdma_transfer_size[origin_or_target].get(name, 0.0) + int(internal_rdma_transfer_size)
-					self.cumulative[origin_or_target][name] = self.cumulative[origin_or_target][name] -  self.input_serial_deserial_time[origin_or_target][name] - self.output_serial_deserial_time[origin_or_target][name] - self.internal_rdma_transfer_time[origin_or_target][name] - self.bulk_transfer_time[origin_or_target][name] - self.operation_time[origin_or_target][name]#Adjust the timings to prevent double-counting
+					self.cumulative[origin_or_target][name] = self.cumulative[origin_or_target][name] - float(input_deserial_time) -float(output_serial_time) - float(bulk_transfer_time) - float(operation_time) - float(internal_rdma_transfer_time)#Adjust the timings to prevent double-counting
 
 				self.countstat[origin_or_target][name].append(int(count))
 				self.cumulativestat[origin_or_target][name].append(float(cumulative))
