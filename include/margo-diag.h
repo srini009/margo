@@ -76,6 +76,7 @@ struct breadcrumb_stats
     double output_serial_time;
     size_t internal_rdma_transfer_size;
     double bulk_transfer_time;
+    double bulk_create_elapsed;
     double operation_time;
 
     /* stats for RPC handler pool sizes */

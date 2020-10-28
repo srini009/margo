@@ -218,6 +218,7 @@ struct margo_request_struct {
     uint64_t is_server;
     double handler_time;
     double ult_time;
+    double bulk_create_elapsed;
     double bulk_transfer_bw;
     double bulk_transfer_start;
     double bulk_transfer_end;
@@ -1853,6 +1854,7 @@ hg_return_t margo_respond(
 
     reqs.handler_time = handler_time;
     reqs.ult_time = ult_time;
+    reqs.bulk_create_elapsed = treq->bulk_create_elapsed;
     reqs.bulk_transfer_start = treq->bulk_transfer_start;
     reqs.bulk_transfer_end = treq->bulk_transfer_end;
     reqs.operation_start_time = treq->operation_start_time;
@@ -1918,6 +1920,13 @@ hg_return_t margo_bulk_create(
     #ifdef APEX_PROFILING
     apex_stop(profiler);
     #endif
+
+    struct margo_request_struct* treq;
+    ABT_key_get(target_timing_key, (void**)(&treq));
+    if (treq != NULL) { 
+      treq->bulk_create_elapsed = tm2-tm1;
+      fprintf(stderr, "Bulk create elapsed %f\n", tm2-tm1);
+    }
     return(hret);
 }
 
@@ -2001,18 +2010,13 @@ hg_return_t margo_bulk_transfer(
     double end = ABT_get_wtime() - start;
     double bw;
     bw = ((double)size/end)/1000000;
-    hg_addr_t self_addr;
-    margo_addr_self(mid, &self_addr);
-    char dest_addr[2048], source_addr[2048];
-    size_t d_addr_sz=2048, s_addr_sz=2048;
-    margo_addr_to_string(mid, source_addr, &s_addr_sz, origin_addr);
-    margo_addr_to_string(mid, dest_addr, &d_addr_sz, self_addr);
     struct margo_request_struct* treq;
     ABT_key_get(target_timing_key, (void**)(&treq));
-    assert(treq != NULL);
-    treq->bulk_transfer_bw = bw;
-    treq->bulk_transfer_start = start;
-    treq->bulk_transfer_end = end+start;
+    if(treq != NULL) {
+      treq->bulk_transfer_bw = bw;
+      treq->bulk_transfer_start = start;
+      treq->bulk_transfer_end = end+start;
+    }
     fprintf(stderr, "Effective bandwidth: %f MBytes/sec, size: %d, time: %f \n", bw, size, end);
 
     return hret;
@@ -2536,7 +2540,7 @@ static void print_profile_data(margo_instance_id mid, FILE *file, const char* na
         avg = 0;
 
     /* first line is breadcrumb data */
-    fprintf(file, "%s,%.9f,%lu,%lu,%d,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%lu,%.9f,%.9f,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%.9f,%.9f\n", name, avg, data->key.rpc_breadcrumb, data->key.addr_hash, data->type, data->stats.cumulative, data->stats.handler_time, data->stats.completion_callback_time, data->stats.input_serial_time, data->stats.input_deserial_time, data->stats.output_serial_time, data->stats.internal_rdma_transfer_time, data->stats.internal_rdma_transfer_size, data->stats.min, data->stats.max, data->stats.count, data->stats.abt_pool_size_hwm, data->stats.abt_pool_size_lwm, data->stats.abt_pool_size_cumulative, data->stats.abt_pool_total_size_hwm, data->stats.abt_pool_total_size_lwm, data->stats.abt_pool_total_size_cumulative, data->stats.bulk_transfer_time, data->stats.operation_time);
+    fprintf(file, "%s,%.9f,%lu,%lu,%d,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%lu,%.9f,%.9f,%lu,%lu,%lu,%lu,%lu,%lu,%lu,%.9f,%.9f,%.9f\n", name, avg, data->key.rpc_breadcrumb, data->key.addr_hash, data->type, data->stats.cumulative, data->stats.handler_time, data->stats.completion_callback_time, data->stats.input_serial_time, data->stats.input_deserial_time, data->stats.output_serial_time, data->stats.internal_rdma_transfer_time, data->stats.internal_rdma_transfer_size, data->stats.min, data->stats.max, data->stats.count, data->stats.abt_pool_size_hwm, data->stats.abt_pool_size_lwm, data->stats.abt_pool_size_cumulative, data->stats.abt_pool_total_size_hwm, data->stats.abt_pool_total_size_lwm, data->stats.abt_pool_total_size_cumulative, data->stats.bulk_transfer_time, data->stats.bulk_create_elapsed, data->stats.operation_time);
 
     /* second line is sparkline data for the given breadcrumb*/
     fprintf(file, "%s,%d;", name, data->type);
@@ -3249,6 +3253,7 @@ static void margo_breadcrumb_measure(margo_instance_id mid, margo_request req, b
       elapsed += req->ult_time + req->handler_time;
       stat->stats.bulk_transfer_time += req->bulk_transfer_end - req->bulk_transfer_start;
       stat->stats.operation_time += req->operation_stop_time - req->operation_start_time;
+      stat->stats.bulk_create_elapsed += req->bulk_create_elapsed;
       #ifdef MERCURY_PROFILING
       /* Read the exported PVAR data from the Mercury Profiling Interface */
       margo_read_pvar_data(mid, req->handle, 6, (void*)&stat->stats.internal_rdma_transfer_time);
