@@ -1853,15 +1853,17 @@ hg_return_t margo_respond(
     apex_profiler_handle internal_profiler = apex_start(APEX_FUNCTION_ADDRESS, &margo_irespond_internal);
     #endif
 
-    reqs.handler_time = handler_time;
-    reqs.ult_time = ult_time;
-    reqs.bulk_create_elapsed = treq->bulk_create_elapsed;
-    reqs.bulk_free_elapsed = treq->bulk_free_elapsed;
-    reqs.bulk_transfer_start = treq->bulk_transfer_start;
-    reqs.bulk_transfer_end = treq->bulk_transfer_end;
-    reqs.operation_start_time = treq->operation_start_time;
-    reqs.operation_stop_time = treq->operation_stop_time;
-    reqs.operation_size = treq->operation_size;
+    if(mid->profile_enabled) {
+      reqs.handler_time = handler_time;
+      reqs.ult_time = ult_time;
+      reqs.bulk_create_elapsed = treq->bulk_create_elapsed;
+      reqs.bulk_free_elapsed = treq->bulk_free_elapsed;
+      reqs.bulk_transfer_start = treq->bulk_transfer_start;
+      reqs.bulk_transfer_end = treq->bulk_transfer_end;
+      reqs.operation_start_time = treq->operation_start_time;
+      reqs.operation_stop_time = treq->operation_stop_time;
+      reqs.operation_size = treq->operation_size;
+    }
     hret = margo_irespond_internal(handle, out_struct, &reqs);
     if(hret != HG_SUCCESS)
         return hret;
